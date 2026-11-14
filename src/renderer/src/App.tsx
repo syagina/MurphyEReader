@@ -6,6 +6,7 @@ import { NotesPanel } from './components/NotesPanel';
 import { OutlinePanel } from './components/OutlinePanel';
 import { PdfViewer } from './components/PdfViewer';
 import { SearchPanel } from './components/SearchPanel';
+import { SettingsDialog } from './components/SettingsDialog';
 import { errorMessage } from './lib/errors';
 import { useChatStore } from './stores/chat';
 import { useLibraryStore } from './stores/library';
@@ -13,6 +14,7 @@ import { useNotesStore } from './stores/notes';
 import { useReaderStore } from './stores/reader';
 import type { ReaderSelection } from './stores/reader';
 import { useSearchStore } from './stores/search';
+import { useSettingsStore } from './stores/settings';
 
 type AiTab = 'chat' | 'notes';
 
@@ -33,6 +35,9 @@ export default function App(): React.JSX.Element {
   const [aiTab, setAiTab] = useState<AiTab>('chat');
   const [conceptPrompt, setConceptPrompt] = useState<ConceptPrompt | null>(null);
   const [pendingLocate, setPendingLocate] = useState<PendingLocate | null>(null);
+  // Region-screenshot attachment waiting in the chat composer.
+  const [pendingImage, setPendingImage] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   // Click-time navigation failures stay visible in the top bar until dismissed,
   // unlike the dropdown error which disappears with the query.
   const [clickError, setClickError] = useState<string | null>(null);
@@ -60,9 +65,17 @@ export default function App(): React.JSX.Element {
 
   const openedPaperId = openedPaper === null ? null : openedPaper.id;
 
-  // A pending concept card belongs to the paper it was started from.
+  // Load AI settings once so vision availability is known before the settings
+  // dialog is ever opened. The store records its own load errors.
+  useEffect(() => {
+    void useSettingsStore.getState().load();
+  }, []);
+
+  // A pending concept card belongs to the paper it was started from, and so
+  // does a pending screenshot.
   useEffect(() => {
     setConceptPrompt(null);
+    setPendingImage(null);
   }, [openedPaperId]);
 
   // Ctrl+K focuses the global search from anywhere in the window.
@@ -247,6 +260,14 @@ export default function App(): React.JSX.Element {
     });
   };
 
+  // 选框提问: keep the cropped image in the composer, then focus the chat tab.
+  const handleCaptureAsk = (imageDataUrl: string): void => {
+    setPendingImage(imageDataUrl);
+    setAiCollapsed(false);
+    setAiTab('chat');
+    useChatStore.getState().requestFocus();
+  };
+
   return (
     <div className="app-frame">
       <header className="app-topbar">
@@ -287,6 +308,13 @@ export default function App(): React.JSX.Element {
             </button>
           </div>
         )}
+        <button
+          type="button"
+          className="topbar-settings"
+          onClick={() => setSettingsOpen(true)}
+        >
+          设置
+        </button>
       </header>
 
       <div className="app-shell">
@@ -330,6 +358,7 @@ export default function App(): React.JSX.Element {
                 }}
                 onJudgeDepth={handleJudgeDepth}
                 onSaveNote={handleSaveNote}
+                onCaptureAsk={handleCaptureAsk}
               />
             </div>
           )}
@@ -378,7 +407,11 @@ export default function App(): React.JSX.Element {
                 </div>
 
                 {aiTab === 'chat' ? (
-                  <ChatPanel paper={openedPaper} />
+                  <ChatPanel
+                    paper={openedPaper}
+                    pendingImage={pendingImage}
+                    onPendingImageConsumed={() => setPendingImage(null)}
+                  />
                 ) : (
                   <>
                     {conceptPrompt !== null && (
@@ -429,6 +462,8 @@ export default function App(): React.JSX.Element {
             ))}
         </aside>
       </div>
+
+      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
     </div>
   );
 }

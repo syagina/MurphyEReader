@@ -8,13 +8,21 @@ import { MarkdownView } from './MarkdownView';
 
 interface ChatPanelProps {
   paper: Paper;
+  /** A pending region screenshot that will be attached to the next send. */
+  pendingImage?: string | null;
+  /** Called when the image was sent successfully or was removed by the user. */
+  onPendingImageConsumed?: () => void;
 }
 
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
 
-export function ChatPanel({ paper }: ChatPanelProps): React.JSX.Element {
+export function ChatPanel({
+  paper,
+  pendingImage = null,
+  onPendingImageConsumed,
+}: ChatPanelProps): React.JSX.Element {
   const paperId = paper.id;
   const conversations = useChatStore((state) => state.conversations);
   const activeConversationId = useChatStore((state) => state.activeConversationId);
@@ -112,11 +120,14 @@ export function ChatPanel({ paper }: ChatPanelProps): React.JSX.Element {
       question: value,
       pageNo: selection !== null ? selection.pageNo : currentPage,
       ...(selection !== null ? { selectionText: selection.text } : {}),
+      ...(pendingImage !== null && pendingImage !== '' ? { images: [pendingImage] } : {}),
     };
     void (async () => {
       await send(args);
       if (useChatStore.getState().error === null) {
         setQuestion('');
+        // A failed send keeps the image so 重发 can replay it with the question.
+        onPendingImageConsumed?.();
       }
     })();
   };
@@ -297,6 +308,15 @@ export function ChatPanel({ paper }: ChatPanelProps): React.JSX.Element {
             </span>
             <button type="button" aria-label="移除选文" onClick={() => setSelection(null)}>
               ×
+            </button>
+          </div>
+        )}
+        {pendingImage !== null && pendingImage !== '' && (
+          <div className="chat-image-chip">
+            <img className="chat-image-preview" src={pendingImage} alt="待发送的截图" />
+            <span className="chat-image-note">截图提问</span>
+            <button type="button" aria-label="移除图片" onClick={() => onPendingImageConsumed?.()}>
+              移除图片
             </button>
           </div>
         )}

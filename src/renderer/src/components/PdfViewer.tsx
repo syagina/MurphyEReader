@@ -10,16 +10,21 @@ import {
   getSelectionInPage,
 } from '../lib/pdf';
 import { errorMessage } from '../lib/errors';
+import { cropToDataUrl, toSourceRect } from '../lib/screenshot';
+import type { Rect } from '../lib/screenshot';
 import { useReaderStore } from '../stores/reader';
 import type { ReaderSelection } from '../stores/reader';
 import { useLibraryStore } from '../stores/library';
+import { useSettingsStore } from '../stores/settings';
 import { PdfPage } from './PdfPage';
+import { RegionCapture } from './RegionCapture';
 
 export interface PdfViewerProps {
   paper: Paper;
   onAskAI?(selection: ReaderSelection): void;
   onJudgeDepth?(selection: ReaderSelection): void;
   onSaveNote?(selection: ReaderSelection): void;
+  onCaptureAsk?(imageDataUrl: string): void;
 }
 
 interface PageSize {
@@ -43,6 +48,7 @@ export function PdfViewer({
   onAskAI,
   onJudgeDepth,
   onSaveNote,
+  onCaptureAsk,
 }: PdfViewerProps): React.JSX.Element {
   const paperId = useReaderStore((state) => state.paperId);
   const version = useReaderStore((state) => state.version);
@@ -57,6 +63,10 @@ export function PdfViewer({
   const jumpToPage = useReaderStore((state) => state.jumpToPage);
   const setSelection = useReaderStore((state) => state.setSelection);
   const setError = useReaderStore((state) => state.setError);
+  // Vision capture is only offered when a vision model is configured; the
+  // settings store is loaded once at App mount so this is known up front.
+  const visionModel = useSettingsStore((state) => state.settings?.visionModel ?? '');
+  const hasVisionModel = visionModel.trim() !== '';
   const translationBound =
     paper.filePathTranslated !== null &&
     paper.filePathTranslated !== '' &&
@@ -75,6 +85,8 @@ export function PdfViewer({
   const [searching, setSearching] = useState(false);
 
   const [toolbarPosition, setToolbarPosition] = useState<ToolbarPosition | null>(null);
+  const [capturing, setCapturing] = useState(false);
+  const [captureError, setCaptureError] = useState<string | null>(null);
 
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -99,6 +111,8 @@ export function PdfViewer({
     setMatchIndex(0);
     setSearching(false);
     setToolbarPosition(null);
+    setCapturing(false);
+    setCaptureError(null);
     searchSeqRef.current += 1;
     lastMarkedRef.current = null;
     lastScrollDerivedPageRef.current = null;
@@ -500,6 +514,65 @@ export function PdfViewer({
   );
   const windowPageSet = useMemo(() => new Set(windowPages), [windowPages]);
 
+  // A capture is accepted only when it sits fully inside one rendered page
+  // canvas; anything else (margin, gutter, two pages) sends nothing.
+  const handleCaptureRegion = useCallback(
+    (rect: Rect): void => {
+      setCapturing(false);
+      const canvases =
+        scrollRef.current?.querySelectorAll<HTMLCanvasElement>(
+          '.pdf-page-wrapper[data-page-no] canvas.pdf-canvas',
+        ) ?? [];
+      for (const canvas of canvases) {
+        const bounds = canvas.getBoundingClientRect();
+        const contained =
+          rect.width > 0 &&
+          rect.height > 0 &&
+          rect.x >= bounds.left &&
+          rect.y >= bounds.top &&
+          rect.x + rect.width <= bounds.right &&
+          rect.y + rect.height <= bounds.bottom;
+        if (!contained) {
+          continue;
+        }
+        const cssRect = {
+          x: rect.x - bounds.left,
+          y: rect.y - bounds.top,
+          width: rect.width,
+          height: rect.height,
+        };
+        const sourceRect = toSourceRect(
+          cssRect,
+          { width: bounds.width, height: bounds.height },
+          { width: canvas.width, height: canvas.height },
+        );
+        void cropToDataUrl(canvas, sourceRect)
+          .then((dataUrl) => {
+            onCaptureAsk?.(dataUrl);
+          })
+          .catch((cropError: unknown) => {
+            setCaptureError(errorMessage(cropError));
+          });
+        return;
+      }
+      setCaptureError('请框选单页内的区域');
+    },
+    [onCaptureAsk],
+  );
+
+  const cancelCapture = useCallback((): void => {
+    setCapturing(false);
+    setCaptureError(null);
+  }, []);
+
+  const captureTitle =
+    onCaptureAsk === undefined
+      ? '将在后续任务接入'
+      : !hasVisionModel
+        ? '未配置视觉模型，请在设置中填写视觉模型'
+        : '框选页面区域向 AI 提问';
+  const captureEnabled = pdf !== null && hasVisionModel && onCaptureAsk !== undefined;
+
   const errorDetail = loadError ?? storeError;
   const toggleTitle = !translationBound
     ? '未绑定译本'
@@ -560,6 +633,19 @@ export function PdfViewer({
           <button
             type="button"
             className="pdf-toolbar-button"
+            aria-label={captureTitle}
+            title={captureTitle}
+            disabled={!captureEnabled}
+            onClick={() => {
+              setCaptureError(null);
+              setCapturing(true);
+            }}
+          >
+            选框提问
+          </button>
+          <button
+            type="button"
+            className="pdf-toolbar-button"
             aria-label={toggleTitle}
             title={toggleTitle}
             disabled={switching || !translationBound}
@@ -594,6 +680,15 @@ export function PdfViewer({
           </div>
         </div>
       </div>
+
+      {captureError !== null && (
+        <div className="viewer-capture-error" role="alert">
+          <span>{captureError}</span>
+          <button type="button" className="menu-button" onClick={() => setCaptureError(null)}>
+            关闭
+          </button>
+        </div>
+      )}
 
       {errorDetail !== null ? (
         <div className="viewer-error" role="alert">
@@ -698,6 +793,8 @@ export function PdfViewer({
           </button>
         </div>
       )}
+
+      {capturing && <RegionCapture onSelect={handleCaptureRegion} onCancel={cancelCapture} />}
     </div>
   );
 }
