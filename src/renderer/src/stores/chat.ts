@@ -238,12 +238,24 @@ export const useChatStore = create<ChatState>()((set, get) => {
       try {
         conversations = sortConversations(await window.api.conversations.list(paperId));
       } catch (error) {
-        if (seq === viewSeq && get().paperId === paperId) {
+        // The list is paper-scoped: report a failure whenever this paper is
+        // still active, even if the view moved meanwhile (e.g. a located
+        // conversation was opened), because nothing else would load the list.
+        if (get().paperId === paperId) {
           set({ error: errorMessage(error) });
         }
         return;
       }
-      if (seq !== viewSeq || get().paperId !== paperId) {
+      if (get().paperId !== paperId) {
+        return;
+      }
+
+      // Populate the selector even when the view moved on while the list was
+      // in flight (a search locate opens the conversation first). The list
+      // supplies rename/delete targets; only the active id and messages belong
+      // to the view, so a stale response must not touch those.
+      set({ conversations });
+      if (seq !== viewSeq) {
         return;
       }
 
@@ -256,7 +268,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
       const activeConversationId =
         kept ??
         (conversations.length > 0 ? conversations[conversations.length - 1].id : null);
-      set({ conversations, activeConversationId });
+      set({ activeConversationId });
 
       if (activeConversationId === null) {
         set({ messages: [] });

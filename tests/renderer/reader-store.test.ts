@@ -74,6 +74,7 @@ function resetStore(): void {
     error: null,
     selection: null,
     failedVersion: null,
+    pendingInitialPage: null,
   });
 }
 
@@ -136,6 +137,82 @@ describe('useReaderStore.open', () => {
 
     await useReaderStore.getState().open(1, Number.NaN);
     expect(useReaderStore.getState().currentPage).toBe(1);
+  });
+
+  it('一次性初始页码在对应文献打开时生效并清空', async () => {
+    api.get.mockImplementation(async (id) =>
+      makePaper({ id, pageCountOriginal: 20, lastPageOriginal: 7 }),
+    );
+
+    useReaderStore.getState().requestInitialPage(2, 5);
+    await useReaderStore.getState().open(2);
+
+    const state = useReaderStore.getState();
+    expect(state.currentPage).toBe(5);
+    expect(state.pendingInitialPage).toBeNull();
+  });
+
+  it('一次性初始页码不会应用到其他文献，也不会被那次打开消耗', async () => {
+    api.get.mockImplementation(async (id) =>
+      makePaper({ id, pageCountOriginal: 20, lastPageOriginal: 7 }),
+    );
+
+    useReaderStore.getState().requestInitialPage(2, 5);
+    await useReaderStore.getState().open(1);
+
+    expect(useReaderStore.getState().currentPage).toBe(7);
+    expect(useReaderStore.getState().pendingInitialPage).toEqual({ paperId: 2, page: 5 });
+
+    await useReaderStore.getState().open(2);
+    expect(useReaderStore.getState().currentPage).toBe(5);
+  });
+
+  it('一次性初始页码只消费一次，再次打开回落到上次阅读页码', async () => {
+    api.get.mockImplementation(async (id) =>
+      makePaper({ id, pageCountOriginal: 20, lastPageOriginal: 7 }),
+    );
+
+    useReaderStore.getState().requestInitialPage(2, 5);
+    await useReaderStore.getState().open(2);
+    expect(useReaderStore.getState().currentPage).toBe(5);
+
+    await useReaderStore.getState().open(2);
+    expect(useReaderStore.getState().currentPage).toBe(7);
+  });
+
+  it('一次性初始页码按总页数钳制', async () => {
+    api.get.mockResolvedValue(makePaper({ pageCountOriginal: 10, lastPageOriginal: 3 }));
+
+    useReaderStore.getState().requestInitialPage(1, 99);
+    await useReaderStore.getState().open(1);
+
+    expect(useReaderStore.getState().currentPage).toBe(10);
+  });
+
+  it('clearInitialPage 丢弃未被消费的一次性初始页码', async () => {
+    api.get.mockResolvedValue(makePaper({ pageCountOriginal: 10, lastPageOriginal: 3 }));
+
+    useReaderStore.getState().requestInitialPage(1, 8);
+    useReaderStore.getState().clearInitialPage();
+    await useReaderStore.getState().open(1);
+
+    expect(useReaderStore.getState().currentPage).toBe(3);
+    expect(useReaderStore.getState().pendingInitialPage).toBeNull();
+  });
+
+  it('显式初始页码优先于一次性初始页码', async () => {
+    api.get.mockImplementation(async (id) =>
+      makePaper({ id, pageCountOriginal: 20, lastPageOriginal: 7 }),
+    );
+
+    useReaderStore.getState().requestInitialPage(2, 5);
+    await useReaderStore.getState().open(2, 9);
+
+    expect(useReaderStore.getState().currentPage).toBe(9);
+    expect(useReaderStore.getState().pendingInitialPage).toBeNull();
+
+    await useReaderStore.getState().open(2);
+    expect(useReaderStore.getState().currentPage).toBe(7);
   });
 
   it('文献不存在时写入错误并保留 paperId', async () => {

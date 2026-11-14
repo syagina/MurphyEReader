@@ -23,8 +23,8 @@ interface ConceptPrompt {
 
 /** A chat message or note hit that still has to be revealed after the paper opens. */
 type PendingLocate =
-  | { kind: 'message'; paperId: number; conversationId: number }
-  | { kind: 'note'; paperId: number; noteId: number };
+  | { kind: 'message'; paperId: number; conversationId: number; seq: number }
+  | { kind: 'note'; paperId: number; noteId: number; seq: number };
 
 export default function App(): React.JSX.Element {
   const [openedPaper, setOpenedPaper] = useState<Paper | null>(null);
@@ -33,7 +33,13 @@ export default function App(): React.JSX.Element {
   const [aiTab, setAiTab] = useState<AiTab>('chat');
   const [conceptPrompt, setConceptPrompt] = useState<ConceptPrompt | null>(null);
   const [pendingLocate, setPendingLocate] = useState<PendingLocate | null>(null);
+  // Click-time navigation failures stay visible in the top bar until dismissed,
+  // unlike the dropdown error which disappears with the query.
+  const [clickError, setClickError] = useState<string | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // Monotonic sequence for result clicks; every continuation after an await
+  // verifies it so a slower older click can never win over a newer one.
+  const locateSeqRef = useRef(0);
   const papers = useLibraryStore((state) => state.papers);
   const generatingNote = useNotesStore((state) => state.generating);
   const searchQuery = useSearchStore((state) => state.query);
@@ -84,6 +90,10 @@ export default function App(): React.JSX.Element {
     }
     const locate = pendingLocate;
     setPendingLocate(null);
+    if (locate.seq !== locateSeqRef.current) {
+      // A newer result click superseded this locate before it could run.
+      return;
+    }
     if (locate.kind === 'message') {
       // The chat store reports load failures through its own error state,
       // which the (now mounted) chat panel displays.
@@ -95,6 +105,9 @@ export default function App(): React.JSX.Element {
       .getState()
       .load(locate.paperId)
       .then(() => {
+        if (locate.seq !== locateSeqRef.current) {
+          return;
+        }
         useNotesStore.getState().selectNote(locate.noteId);
       });
   }, [pendingLocate, openedPaper]);
@@ -104,44 +117,84 @@ export default function App(): React.JSX.Element {
   };
 
   const handleSearchSelect = async (result: SearchResult): Promise<void> => {
+    const seq = ++locateSeqRef.current;
     const search = useSearchStore.getState();
     search.setError(null);
+    setClickError(null);
+    // This click supersedes any earlier one whose one-shot page was never
+    // consumed; a later normal open of that paper must not jump to it.
+    useReaderStore.getState().clearInitialPage();
 
+    let targetPage: number | null = null;
     let locate: PendingLocate | null = null;
-    if (result.kind === 'message') {
+    if (result.kind === 'page') {
+      if (result.pageNo === undefined) {
+        setClickError('搜索结果缺少页码信息');
+        return;
+      }
+      targetPage = result.pageNo;
+    } else if (result.kind === 'message') {
       if (result.conversationId === undefined) {
-        search.setError('搜索结果缺少会话信息');
+        setClickError('搜索结果缺少会话信息');
         return;
       }
       locate = {
         kind: 'message',
         paperId: result.paperId,
         conversationId: result.conversationId,
+        seq,
       };
-    } else if (result.kind === 'note') {
+    } else {
       if (result.noteId === undefined) {
-        search.setError('搜索结果缺少笔记信息');
+        setClickError('搜索结果缺少笔记信息');
         return;
       }
-      locate = { kind: 'note', paperId: result.paperId, noteId: result.noteId };
+      locate = { kind: 'note', paperId: result.paperId, noteId: result.noteId, seq };
     }
 
     try {
       const paper = await window.api.papers.get(result.paperId);
-      if (paper === null) {
-        search.setError(`文献不存在: ${result.paperId}`);
+      if (seq !== locateSeqRef.current) {
         return;
       }
-      await useReaderStore.getState().open(paper.id, result.pageNo);
-      setOpenedPaper(paper);
+      if (paper === null) {
+        setClickError(`文献不存在: ${result.paperId}`);
+        return;
+      }
+
+      const alreadyOpen =
+        useReaderStore.getState().paperId === paper.id && openedPaper?.id === paper.id;
+      if (alreadyOpen) {
+        // Same reader session: jump in place so the translated version, zoom
+        // and selection survive; never re-run open() for the current paper.
+        if (targetPage !== null) {
+          useReaderStore.getState().jumpToPage(targetPage);
+        }
+      } else {
+        // Switch the paper first, then hand the viewer a one-shot start page;
+        // PdfViewer's own open() consumes it. No reader-store mutation happens
+        // between the commit and that open, so the old viewer cannot re-open
+        // the previous paper and invalidate the target page.
+        setOpenedPaper(paper);
+        if (targetPage !== null) {
+          useReaderStore.getState().requestInitialPage(paper.id, targetPage);
+        }
+      }
+
       if (locate !== null) {
         setAiCollapsed(false);
         setAiTab(locate.kind === 'message' ? 'chat' : 'notes');
         setPendingLocate(locate);
+      } else {
+        // A newer page hit supersedes any locate queued by an earlier click.
+        setPendingLocate(null);
       }
       search.clear();
     } catch (error) {
-      search.setError(errorMessage(error));
+      if (seq !== locateSeqRef.current) {
+        return;
+      }
+      setClickError(errorMessage(error));
     }
   };
 
@@ -221,6 +274,19 @@ export default function App(): React.JSX.Element {
             }}
           />
         </div>
+        {clickError !== null && (
+          <div className="topbar-error" role="alert">
+            <span className="topbar-error-text">{clickError}</span>
+            <button
+              type="button"
+              className="topbar-error-dismiss"
+              aria-label="关闭搜索导航错误"
+              onClick={() => setClickError(null)}
+            >
+              关闭
+            </button>
+          </div>
+        )}
       </header>
 
       <div className="app-shell">

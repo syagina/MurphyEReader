@@ -204,24 +204,68 @@ describe('useChatStore.loadForPaper', () => {
     expect(api.messages.list).toHaveBeenCalledWith(1);
   });
 
-  it('在途 loadForPaper 不会覆盖显式打开的会话', async () => {
+  it('在途会话列表在定位会话后仍填充列表，且不覆盖已定位会话', async () => {
+    // Start from another paper so the sequence really is a cross-paper load.
+    useChatStore.setState({
+      paperId: 2,
+      conversations: [makeConversation(9, { paperId: 2 })],
+      activeConversationId: 9,
+      messages: [makeMessage(90, 9)],
+    });
     const conversations = deferred<Conversation[]>();
     api.conversations.list.mockImplementation(() => conversations.promise);
-    const targetMessages = [makeMessage(5, 2, { role: 'user', content: '被搜索定位的消息' })];
-    api.messages.list.mockImplementation(async (conversationId) =>
-      conversationId === 2 ? targetMessages : [],
-    );
+    const locatedMessages = [
+      makeMessage(11, 1, { role: 'user', content: '被搜索定位的消息' }),
+    ];
+    const newestMessages = [makeMessage(12, 2, { content: '最新会话的消息' })];
+    api.messages.list.mockImplementation(async (conversationId) => {
+      if (conversationId === 1) {
+        return locatedMessages;
+      }
+      if (conversationId === 2) {
+        return newestMessages;
+      }
+      return [];
+    });
 
-    // ChatPanel mounts and starts loading before App locates the search hit.
+    // ChatPanel mounts for paper 1 and starts the list fetch; App then locates
+    // a NON-newest conversation before that fetch resolves.
     const loading = useChatStore.getState().loadForPaper(1);
-    await useChatStore.getState().openConversation(1, 2);
+    await useChatStore.getState().openConversation(1, 1);
+    expect(useChatStore.getState().activeConversationId).toBe(1);
 
-    conversations.resolve([makeConversation(1), makeConversation(2)]);
+    conversations.resolve([makeConversation(1), makeConversation(2, { title: '最新' })]);
     await loading;
 
     const state = useChatStore.getState();
-    expect(state.activeConversationId).toBe(2);
-    expect(state.messages).toEqual(targetMessages);
+    expect(state.paperId).toBe(1);
+    // The selector must list every conversation so rename/delete stay usable.
+    expect(state.conversations).toEqual([
+      makeConversation(1),
+      makeConversation(2, { title: '最新' }),
+    ]);
+    // The located conversation stays active with its own messages; the in-flight
+    // list must not fall back to the newest conversation and load its messages.
+    expect(state.activeConversationId).toBe(1);
+    expect(state.messages).toEqual(locatedMessages);
+    expect(api.messages.list).not.toHaveBeenCalledWith(2);
+  });
+
+  it('在途会话列表失败时仍写入错误，即使视图已切到定位会话', async () => {
+    const conversations = deferred<Conversation[]>();
+    api.conversations.list.mockImplementation(() => conversations.promise);
+    const locatedMessages = [makeMessage(11, 1)];
+    api.messages.list.mockResolvedValue(locatedMessages);
+
+    const loading = useChatStore.getState().loadForPaper(1);
+    await useChatStore.getState().openConversation(1, 1);
+    conversations.reject(new Error('列表失败'));
+    await loading;
+
+    const state = useChatStore.getState();
+    expect(state.error).toBe('列表失败');
+    expect(state.activeConversationId).toBe(1);
+    expect(state.messages).toEqual(locatedMessages);
   });
 
   it('当前会话已不存在时选择最新会话', async () => {

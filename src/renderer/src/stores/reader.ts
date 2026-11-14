@@ -22,11 +22,25 @@ export interface ReaderState {
    */
   failedVersion: 'original' | 'translated' | null;
   /**
+   * One-shot start page requested for a paper that is about to open. The App
+   * stores it before switching papers; the viewer's own `open` consumes it.
+   * It never mutates the current session, unlike calling `open` directly.
+   */
+  pendingInitialPage: { paperId: number; page: number } | null;
+  /**
    * Opens a paper in the reader. `initialPage`, when given (e.g. a global
    * search hit), wins over the paper's `lastPageOriginal` for the restored
-   * page; both are clamped to the paper's page count.
+   * page; both are clamped to the paper's page count. Without an explicit
+   * argument a pending one-shot page for the same paper is used instead.
    */
   open(paperId: number, initialPage?: number): Promise<void>;
+  /** Requests the page `open(paperId)` should restore; consumed by that open. */
+  requestInitialPage(paperId: number, page: number): void;
+  /**
+   * Drops a pending one-shot page request, e.g. when its result click was
+   * superseded before the viewer could consume it.
+   */
+  clearInitialPage(): void;
   /**
    * Switches the open reader between the original PDF and its translation.
    * Only `version`, `pageCount` and `currentPage` change; a failed switch keeps
@@ -65,6 +79,7 @@ interface ReaderFields {
   error: string | null;
   selection: ReaderSelection | null;
   failedVersion: 'original' | 'translated' | null;
+  pendingInitialPage: { paperId: number; page: number } | null;
 }
 
 function initialFields(): ReaderFields {
@@ -77,6 +92,7 @@ function initialFields(): ReaderFields {
     error: null,
     selection: null,
     failedVersion: null,
+    pendingInitialPage: null,
   };
 }
 
@@ -92,7 +108,16 @@ export const useReaderStore = create<ReaderState>()((set, get) => ({
 
   async open(paperId, initialPage) {
     const seq = ++openSeq;
-    set({ ...initialFields(), paperId });
+    const pending = get().pendingInitialPage;
+    const pendingPage =
+      pending !== null && pending.paperId === paperId ? pending.page : undefined;
+    // A request for another paper survives: opening some other paper must not
+    // silently eat the page a later open of that paper still has to apply.
+    set({
+      ...initialFields(),
+      paperId,
+      pendingInitialPage: pendingPage === undefined ? pending : null,
+    });
     try {
       const paper = await window.api.papers.get(paperId);
       if (seq !== openSeq) {
@@ -103,10 +128,11 @@ export const useReaderStore = create<ReaderState>()((set, get) => ({
         return;
       }
       const pageCount = paper.pageCountOriginal;
+      const requestedPage = initialPage ?? pendingPage;
       set({
         pageCount,
         currentPage: clampPage(
-          initialPage !== undefined ? initialPage : paper.lastPageOriginal || 1,
+          requestedPage !== undefined ? requestedPage : paper.lastPageOriginal || 1,
           pageCount,
         ),
       });
@@ -127,6 +153,14 @@ export const useReaderStore = create<ReaderState>()((set, get) => ({
       // Metadata lookup failures (e.g. DB errors) surface in the viewer error UI.
       set({ error: errorMessage(error) });
     }
+  },
+
+  requestInitialPage(paperId, page) {
+    set({ pendingInitialPage: { paperId, page } });
+  },
+
+  clearInitialPage() {
+    set({ pendingInitialPage: null });
   },
 
   async setVersion(version) {

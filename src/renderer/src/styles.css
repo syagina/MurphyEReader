@@ -106,6 +106,45 @@ input:focus-visible {
   outline: 2px solid var(--accent-soft);
 }
 
+/* Click-time navigation failure; survives the dropdown closing. */
+.topbar-error {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  padding: 4px 10px;
+  border: 1px solid #f0c4bc;
+  border-radius: 6px;
+  background: var(--danger-soft);
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.topbar-error-text {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.topbar-error-dismiss {
+  flex: 0 0 auto;
+  padding: 2px 8px;
+  border: 1px solid #f0c4bc;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--danger);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.topbar-error-dismiss:hover {
+  background: #fbe4df;
+}
+
 /* Dropdown under the global search input while the query is non-empty. */
 .search-panel {
   position: absolute;
