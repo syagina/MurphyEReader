@@ -106,6 +106,18 @@ describe('parseMarkdown', () => {
     ]);
   });
 
+  it('原始 HTML 标签保留为纯文本，不会被解析为标记', () => {
+    expect(parseMarkdown('<script>alert("x")</script>')).toEqual([
+      {
+        type: 'paragraph',
+        children: [{ type: 'text', text: '<script>alert("x")</script>' }],
+      },
+    ]);
+    expect(parseMarkdown('# <b>标题</b>')).toEqual([
+      { type: 'heading', level: 1, children: [{ type: 'text', text: '<b>标题</b>' }] },
+    ]);
+  });
+
   it('未闭合的粗体与行内代码按原文保留', () => {
     expect(parseMarkdown('**未闭合 和 `代码')).toEqual([
       { type: 'paragraph', children: [{ type: 'text', text: '**未闭合 和 `代码' }] },

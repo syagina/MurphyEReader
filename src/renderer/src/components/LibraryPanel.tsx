@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import type { Paper } from '@shared/types';
 import { formatPaperMeta } from '../lib/format';
 import { useLibraryStore } from '../stores/library';
+import { useNotesStore } from '../stores/notes';
 
 interface LibraryPanelProps {
   onOpen(paper: Paper): void;
@@ -36,6 +37,8 @@ export function LibraryPanel({ onOpen }: LibraryPanelProps): React.JSX.Element {
   const relocate = useLibraryStore((state) => state.relocate);
   const removePaper = useLibraryStore((state) => state.removePaper);
   const updateMeta = useLibraryStore((state) => state.updateMeta);
+  const generateNote = useNotesStore((state) => state.generate);
+  const notesGenerating = useNotesStore((state) => state.generating);
 
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
   const [draft, setDraft] = useState<EditDraft | null>(null);
@@ -63,6 +66,13 @@ export function LibraryPanel({ onOpen }: LibraryPanelProps): React.JSX.Element {
   const handleOpen = (paper: Paper): void => {
     setOpenMenuId(null);
     onOpen(paper);
+  };
+
+  const handleGenerateSummary = (paper: Paper): void => {
+    setOpenMenuId(null);
+    // Generation is not tied to the open reader: any paper can be summarized.
+    // The notes store keeps the error for the notes panel to show.
+    void generateNote('summary', { paperId: paper.id });
   };
 
   const handleAttach = (paper: Paper): void => {
@@ -245,6 +255,14 @@ export function LibraryPanel({ onOpen }: LibraryPanelProps): React.JSX.Element {
                           onClick={() => handleOpen(paper)}
                         >
                           打开
+                        </button>
+                        <button
+                          type="button"
+                          className="menu-button"
+                          disabled={notesGenerating !== null}
+                          onClick={() => handleGenerateSummary(paper)}
+                        >
+                          {notesGenerating === 'summary' ? '生成中…' : '生成结构化总结'}
                         </button>
                         <button
                           type="button"

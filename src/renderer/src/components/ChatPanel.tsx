@@ -1,11 +1,9 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { Paper } from '@shared/types';
-import { parseCitations } from '../lib/citations';
-import { parseMarkdown } from '../lib/markdown';
-import type { MarkdownBlock, MarkdownInline } from '../lib/markdown';
 import { useChatStore } from '../stores/chat';
 import { useReaderStore } from '../stores/reader';
 import type { ReaderSelection } from '../stores/reader';
+import { MarkdownView } from './MarkdownView';
 
 interface ChatPanelProps {
   paper: Paper;
@@ -17,88 +15,6 @@ function errorMessage(error: unknown): string {
 
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
-}
-
-/**
- * Renders inline text, turning `[p.N]` into buttons that jump the reader.
- * Citations inside inline code stay literal because code nodes never reach
- * this component.
- */
-function MarkdownText({ text }: { text: string }): React.JSX.Element {
-  return (
-    <>
-      {parseCitations(text).map((segment, index) =>
-        segment.type === 'text' ? (
-          <span key={index}>{segment.text}</span>
-        ) : (
-          <button
-            key={index}
-            type="button"
-            className="citation-link"
-            title={`跳到第 ${segment.pageNo} 页`}
-            onClick={() => useReaderStore.getState().jumpToPage(segment.pageNo)}
-          >
-            [p.{segment.pageNo}]
-          </button>
-        ),
-      )}
-    </>
-  );
-}
-
-function renderInline(nodes: MarkdownInline[]): React.ReactNode[] {
-  return nodes.map((node, index) => {
-    switch (node.type) {
-      case 'text':
-        return <MarkdownText key={index} text={node.text} />;
-      case 'bold':
-        return <strong key={index}>{renderInline(node.children)}</strong>;
-      case 'code':
-        return (
-          <code className="chat-inline-code" key={index}>
-            {node.text}
-          </code>
-        );
-      case 'break':
-        return <br key={index} />;
-    }
-  });
-}
-
-function renderBlock(block: MarkdownBlock, key: number): React.ReactNode {
-  switch (block.type) {
-    case 'paragraph':
-      return <p key={key}>{renderInline(block.children)}</p>;
-    case 'heading': {
-      const Heading = `h${block.level}` as 'h1' | 'h2' | 'h3' | 'h4' | 'h5' | 'h6';
-      return (
-        <Heading className="chat-md-heading" key={key}>
-          {renderInline(block.children)}
-        </Heading>
-      );
-    }
-    case 'codeBlock':
-      return (
-        <pre className="chat-md-code" key={key}>
-          <code>{block.text}</code>
-        </pre>
-      );
-    case 'list': {
-      const List = block.ordered ? 'ol' : 'ul';
-      return (
-        <List className="chat-md-list" key={key}>
-          {block.items.map((item, itemIndex) => (
-            <li key={itemIndex}>{renderInline(item)}</li>
-          ))}
-        </List>
-      );
-    }
-  }
-}
-
-function MarkdownView({ text }: { text: string }): React.JSX.Element {
-  const blocks = useMemo(() => parseMarkdown(text), [text]);
-  return <div className="chat-markdown">{blocks.map((block, index) => renderBlock(block, index))}</div>;
 }
 
 export function ChatPanel({ paper }: ChatPanelProps): React.JSX.Element {

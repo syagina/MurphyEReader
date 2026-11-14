@@ -15,3 +15,12 @@ export function formatPaperMeta(paper: Pick<Paper, 'authors' | 'year'>): string 
   }
   return parts.length === 0 ? '未知作者' : parts.join(' · ');
 }
+
+/** Formats a millisecond timestamp as `YYYY-MM-DD HH:mm` in local time. */
+export function formatTimestamp(timestamp: number): string {
+  const date = new Date(timestamp);
+  const pad = (value: number): string => String(value).padStart(2, '0');
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(
+    date.getHours(),
+  )}:${pad(date.getMinutes())}`;
+}
