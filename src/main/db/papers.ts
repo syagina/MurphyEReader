@@ -20,6 +20,8 @@ const PATCH_COLUMNS = {
   tags: 'tags_json',
   lastPageOriginal: 'last_page_original',
   lastPageTranslated: 'last_page_translated',
+  filePathOriginal: 'file_path_original',
+  pageCountOriginal: 'page_count_original',
   filePathTranslated: 'file_path_translated',
   pageCountTranslated: 'page_count_translated',
   outline: 'outline_json',
@@ -122,6 +124,8 @@ export function updatePaper(
       | 'tags'
       | 'lastPageOriginal'
       | 'lastPageTranslated'
+      | 'filePathOriginal'
+      | 'pageCountOriginal'
       | 'filePathTranslated'
       | 'pageCountTranslated'
       | 'outline'
