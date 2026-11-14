@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { Paper } from '@shared/types';
+import { ChatPanel } from './components/ChatPanel';
 import { LibraryPanel } from './components/LibraryPanel';
 import { OutlinePanel } from './components/OutlinePanel';
 import { PdfViewer } from './components/PdfViewer';
+import { useChatStore } from './stores/chat';
 import { useLibraryStore } from './stores/library';
 import { useReaderStore } from './stores/reader';
 
@@ -61,7 +63,13 @@ export default function App(): React.JSX.Element {
         ) : (
           <div className="reader-layout">
             <OutlinePanel outline={openedPaper.outline} onJump={handleOutlineJump} />
-            <PdfViewer paper={openedPaper} />
+            <PdfViewer
+              paper={openedPaper}
+              onAskAI={() => {
+                setAiCollapsed(false);
+                useChatStore.getState().requestFocus();
+              }}
+            />
           </div>
         )}
       </main>
@@ -79,7 +87,12 @@ export default function App(): React.JSX.Element {
             {aiCollapsed ? '«' : '»'}
           </button>
         </div>
-        {!aiCollapsed && <p className="ai-placeholder">AI 对话面板将在后续任务中接入。</p>}
+        {!aiCollapsed &&
+          (openedPaper === null ? (
+            <p className="ai-placeholder">打开一篇文献后，即可就内容向 AI 提问。</p>
+          ) : (
+            <ChatPanel paper={openedPaper} />
+          ))}
       </aside>
     </div>
   );
