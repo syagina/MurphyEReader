@@ -519,6 +519,12 @@ input:focus-visible {
   background: var(--bg-panel);
 }
 
+.pdf-toolbar-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .pdf-search {
   display: flex;
   flex-wrap: wrap;

@@ -11,6 +11,7 @@ import {
 } from '../lib/pdf';
 import { useReaderStore } from '../stores/reader';
 import type { ReaderSelection } from '../stores/reader';
+import { useLibraryStore } from '../stores/library';
 import { PdfPage } from './PdfPage';
 
 export interface PdfViewerProps {
@@ -53,17 +54,20 @@ export function PdfViewer({
   const storeError = useReaderStore((state) => state.error);
   const selection = useReaderStore((state) => state.selection);
   const open = useReaderStore((state) => state.open);
+  const setVersion = useReaderStore((state) => state.setVersion);
   const setCurrentPage = useReaderStore((state) => state.setCurrentPage);
   const setZoom = useReaderStore((state) => state.setZoom);
   const jumpToPage = useReaderStore((state) => state.jumpToPage);
   const setSelection = useReaderStore((state) => state.setSelection);
   const setError = useReaderStore((state) => state.setError);
+  const translationBound = paper.filePathTranslated !== null && paper.filePathTranslated !== '';
 
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [pageSizes, setPageSizes] = useState<PageSize[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [reloadToken, setReloadToken] = useState(0);
   const [relocating, setRelocating] = useState(false);
+  const [switching, setSwitching] = useState(false);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [matches, setMatches] = useState<number[] | null>(null);
@@ -100,10 +104,14 @@ export function PdfViewer({
     lastScrollDerivedPageRef.current = null;
 
     const load = async (): Promise<void> => {
-      // open() validates metadata and file readability and fills the store.
-      await open(paper.id);
-      if (cancelled) {
-        return;
+      // A paper change (or the initial mount) must open a new reader session;
+      // a version switch already updated the store and must keep its state.
+      if (useReaderStore.getState().paperId !== paper.id) {
+        // open() validates metadata and file readability and fills the store.
+        await open(paper.id);
+        if (cancelled) {
+          return;
+        }
       }
       if (useReaderStore.getState().error !== null) {
         // The store error UI already explains the failure; do not read twice.
@@ -154,7 +162,7 @@ export function PdfViewer({
         void loadingTask.destroy();
       }
     };
-  }, [paper.id, reloadToken, open, setError]);
+  }, [paper.id, reloadToken, version, open, setError]);
 
   const flushMarkRead = useCallback((): void => {
     if (markReadTimerRef.current !== null) {
@@ -200,6 +208,40 @@ export function PdfViewer({
       flushMarkRead();
     }, 500);
   }, [pdf, paperId, version, currentPage, flushMarkRead]);
+
+  // Switch between the original and translated PDF. The pending progress write
+  // still carries the old version and is flushed before the new document loads.
+  const handleToggleVersion = useCallback(async (): Promise<void> => {
+    if (switching || !translationBound) {
+      return;
+    }
+    const target = useReaderStore.getState().version === 'original' ? 'translated' : 'original';
+    flushMarkRead();
+    lastMarkedRef.current = null;
+    setSwitching(true);
+    try {
+      await setVersion(target);
+    } finally {
+      setSwitching(false);
+    }
+  }, [switching, translationBound, flushMarkRead, setVersion]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (!(event.ctrlKey || event.metaKey) || !event.shiftKey) {
+        return;
+      }
+      if (event.key.toLowerCase() !== 't' || switching || !translationBound) {
+        return;
+      }
+      event.preventDefault();
+      void handleToggleVersion();
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [switching, translationBound, handleToggleVersion]);
 
   const updateCurrentPageFromScroll = useCallback((): void => {
     const container = scrollRef.current;
@@ -411,11 +453,27 @@ export function PdfViewer({
   const handleRelocate = async (): Promise<void> => {
     setRelocating(true);
     try {
-      const updated = await window.api.papers.relocate(paper.id, 'original');
+      const target = useReaderStore.getState().version;
+      const updated = await window.api.papers.relocate(paper.id, target);
       if (updated !== null) {
         setLoadError(null);
         setError(null);
-        setReloadToken((token) => token + 1);
+        flushMarkRead();
+        lastMarkedRef.current = null;
+        // Reload metadata (path, page count, outline) for the relocated file.
+        await open(paper.id);
+        if (target === 'translated') {
+          // open() reset the session to the original; restore the translated view.
+          await setVersion('translated');
+        } else {
+          setReloadToken((token) => token + 1);
+        }
+        void useLibraryStore
+          .getState()
+          .load()
+          .catch((refreshError: unknown) => {
+            console.warn('刷新文献库失败', refreshError);
+          });
       }
     } catch (error) {
       setLoadError(errorMessage(error));
@@ -431,6 +489,11 @@ export function PdfViewer({
   const windowPageSet = useMemo(() => new Set(windowPages), [windowPages]);
 
   const errorDetail = loadError ?? storeError;
+  const toggleTitle = !translationBound
+    ? '未绑定译本'
+    : version === 'original'
+      ? '切换到中文译本'
+      : '切换到原文';
 
   return (
     <div className="pdf-viewer">
@@ -481,28 +544,42 @@ export function PdfViewer({
               </span>
             ))}
         </form>
-        <div className="pdf-zoom">
+        <div className="pdf-toolbar-right">
           <button
             type="button"
             className="pdf-toolbar-button"
-            title="缩小"
-            aria-label="缩小"
-            disabled={zoom <= 0.5}
-            onClick={() => setZoom(zoom - 0.25)}
+            aria-label={toggleTitle}
+            title={toggleTitle}
+            disabled={switching || !translationBound}
+            onClick={() => {
+              void handleToggleVersion();
+            }}
           >
-            −
+            中/英
           </button>
-          <span className="pdf-zoom-value">{Math.round(zoom * 100)}%</span>
-          <button
-            type="button"
-            className="pdf-toolbar-button"
-            title="放大"
-            aria-label="放大"
-            disabled={zoom >= 3}
-            onClick={() => setZoom(zoom + 0.25)}
-          >
-            +
-          </button>
+          <div className="pdf-zoom">
+            <button
+              type="button"
+              className="pdf-toolbar-button"
+              title="缩小"
+              aria-label="缩小"
+              disabled={zoom <= 0.5}
+              onClick={() => setZoom(zoom - 0.25)}
+            >
+              −
+            </button>
+            <span className="pdf-zoom-value">{Math.round(zoom * 100)}%</span>
+            <button
+              type="button"
+              className="pdf-toolbar-button"
+              title="放大"
+              aria-label="放大"
+              disabled={zoom >= 3}
+              onClick={() => setZoom(zoom + 0.25)}
+            >
+              +
+            </button>
+          </div>
         </div>
       </div>
 

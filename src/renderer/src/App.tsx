@@ -1,14 +1,28 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Paper } from '@shared/types';
 import { LibraryPanel } from './components/LibraryPanel';
 import { OutlinePanel } from './components/OutlinePanel';
 import { PdfViewer } from './components/PdfViewer';
+import { useLibraryStore } from './stores/library';
 import { useReaderStore } from './stores/reader';
 
 export default function App(): React.JSX.Element {
   const [openedPaper, setOpenedPaper] = useState<Paper | null>(null);
   const [libraryCollapsed, setLibraryCollapsed] = useState(false);
   const [aiCollapsed, setAiCollapsed] = useState(false);
+  const papers = useLibraryStore((state) => state.papers);
+
+  // Keep the open reader's snapshot in sync with library changes (a newly
+  // bound translation, relocation metadata, edited title, refreshed outline).
+  useEffect(() => {
+    if (openedPaper === null) {
+      return;
+    }
+    const current = papers.find((paper) => paper.id === openedPaper.id);
+    if (current !== undefined && current !== openedPaper) {
+      setOpenedPaper(current);
+    }
+  }, [papers, openedPaper]);
 
   const handleOutlineJump = (pageNo: number): void => {
     useReaderStore.getState().jumpToPage(pageNo);

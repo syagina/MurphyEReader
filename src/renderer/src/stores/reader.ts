@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import { clampPage } from '../lib/pdf';
+import { resolveToggleTargetPage } from '../lib/toggle';
 
 export interface ReaderSelection {
   text: string;
@@ -15,6 +16,12 @@ export interface ReaderState {
   error: string | null;
   selection: ReaderSelection | null;
   open(paperId: number): Promise<void>;
+  /**
+   * Switches the open reader between the original PDF and its translation.
+   * Only `version`, `pageCount` and `currentPage` change; a failed switch keeps
+   * the current version and reports the failure through `error`.
+   */
+  setVersion(version: 'original' | 'translated'): Promise<void>;
   close(): void;
   setCurrentPage(page: number): void;
   setZoom(z: number): void;
@@ -31,8 +38,9 @@ const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
 
 /**
- * Monotonic generation for `open`. Overlapping opens are possible when the
- * user switches papers quickly; only the newest generation may write state.
+ * Monotonic generation for `open` and `setVersion`. Overlapping document
+ * switches are possible when the user acts quickly; only the newest generation
+ * may write state.
  */
 let openSeq = 0;
 
@@ -104,6 +112,56 @@ export const useReaderStore = create<ReaderState>()((set, get) => ({
         return;
       }
       // Metadata lookup failures (e.g. DB errors) surface in the viewer error UI.
+      set({ error: errorMessage(error) });
+    }
+  },
+
+  async setVersion(version) {
+    const state = get();
+    const paperId = state.paperId;
+    if (paperId === null || state.version === version) {
+      return;
+    }
+    const seq = ++openSeq;
+    try {
+      const paper = await window.api.papers.get(paperId);
+      if (seq !== openSeq) {
+        return;
+      }
+      if (paper === null) {
+        set({ error: `文献不存在: ${paperId}` });
+        return;
+      }
+      if (
+        version === 'translated' &&
+        (paper.filePathTranslated === null ||
+          paper.filePathTranslated === '' ||
+          paper.pageCountTranslated === null)
+      ) {
+        set({ error: '未绑定译本' });
+        return;
+      }
+      const pageCount =
+        version === 'original' ? paper.pageCountOriginal : (paper.pageCountTranslated ?? 0);
+      const currentPage = resolveToggleTargetPage({
+        from: state.version,
+        to: version,
+        currentPage: state.currentPage,
+        lastPageOriginal: paper.lastPageOriginal,
+        lastPageTranslated: paper.lastPageTranslated,
+        pageCountOriginal: paper.pageCountOriginal,
+        pageCountTranslated: paper.pageCountTranslated,
+      });
+      await window.api.pdf.load(paperId, version);
+      if (seq !== openSeq) {
+        return;
+      }
+      // `zoom` is intentionally untouched: the reader keeps its scale.
+      set({ version, pageCount, currentPage, error: null, selection: null });
+    } catch (error) {
+      if (seq !== openSeq) {
+        return;
+      }
       set({ error: errorMessage(error) });
     }
   },
