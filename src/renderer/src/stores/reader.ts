@@ -15,6 +15,11 @@ export interface ReaderState {
   zoom: number;
   error: string | null;
   selection: ReaderSelection | null;
+  /**
+   * The version whose load failed last, when known. The error panel's
+   * relocation action targets it instead of the version currently displayed.
+   */
+  failedVersion: 'original' | 'translated' | null;
   open(paperId: number): Promise<void>;
   /**
    * Switches the open reader between the original PDF and its translation.
@@ -30,6 +35,7 @@ export interface ReaderState {
   /**
    * Extension for PDF viewer load failures (missing/corrupt files): the viewer
    * mirrors its local error here so other panels can see that reading failed.
+   * A non-null message marks the current version as failed; null clears both.
    */
   setError(message: string | null): void;
 }
@@ -52,6 +58,7 @@ interface ReaderFields {
   zoom: number;
   error: string | null;
   selection: ReaderSelection | null;
+  failedVersion: 'original' | 'translated' | null;
 }
 
 function initialFields(): ReaderFields {
@@ -63,6 +70,7 @@ function initialFields(): ReaderFields {
     zoom: 1,
     error: null,
     selection: null,
+    failedVersion: null,
   };
 }
 
@@ -105,7 +113,7 @@ export const useReaderStore = create<ReaderState>()((set, get) => ({
         if (seq !== openSeq) {
           return;
         }
-        set({ error: errorMessage(error) });
+        set({ error: errorMessage(error), failedVersion: 'original' });
       }
     } catch (error) {
       if (seq !== openSeq) {
@@ -129,7 +137,7 @@ export const useReaderStore = create<ReaderState>()((set, get) => ({
         return;
       }
       if (paper === null) {
-        set({ error: `文献不存在: ${paperId}` });
+        set({ error: `文献不存在: ${paperId}`, failedVersion: version });
         return;
       }
       if (
@@ -138,35 +146,48 @@ export const useReaderStore = create<ReaderState>()((set, get) => ({
           paper.filePathTranslated === '' ||
           paper.pageCountTranslated === null)
       ) {
-        set({ error: '未绑定译本' });
+        set({ error: '未绑定译本', failedVersion: version });
         return;
       }
       const pageCount =
         version === 'original' ? paper.pageCountOriginal : (paper.pageCountTranslated ?? 0);
+      await window.api.pdf.load(paperId, version);
+      if (seq !== openSeq) {
+        return;
+      }
+      // Resolve after the validation read so a scroll made meanwhile wins: the
+      // seq guard above proves the session (and thus `version`) is unchanged.
+      const latest = get();
       const currentPage = resolveToggleTargetPage({
-        from: state.version,
+        from: latest.version,
         to: version,
-        currentPage: state.currentPage,
+        currentPage: latest.currentPage,
         lastPageOriginal: paper.lastPageOriginal,
         lastPageTranslated: paper.lastPageTranslated,
         pageCountOriginal: paper.pageCountOriginal,
         pageCountTranslated: paper.pageCountTranslated,
       });
-      await window.api.pdf.load(paperId, version);
-      if (seq !== openSeq) {
-        return;
-      }
       // `zoom` is intentionally untouched: the reader keeps its scale.
-      set({ version, pageCount, currentPage, error: null, selection: null });
+      set({
+        version,
+        pageCount,
+        currentPage,
+        error: null,
+        failedVersion: null,
+        selection: null,
+      });
     } catch (error) {
       if (seq !== openSeq) {
         return;
       }
-      set({ error: errorMessage(error) });
+      set({ error: errorMessage(error), failedVersion: version });
     }
   },
 
   close() {
+    // Invalidate any in-flight open/setVersion so it cannot resurrect a
+    // session after the reader was closed.
+    ++openSeq;
     set(initialFields());
   },
 
@@ -187,6 +208,8 @@ export const useReaderStore = create<ReaderState>()((set, get) => ({
   },
 
   setError(message) {
-    set({ error: message });
+    // A non-null message means the viewer failed to load the CURRENT document;
+    // remember that version so relocation repairs the right file.
+    set({ error: message, failedVersion: message === null ? null : get().version });
   },
 }));

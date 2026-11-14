@@ -60,7 +60,10 @@ export function PdfViewer({
   const jumpToPage = useReaderStore((state) => state.jumpToPage);
   const setSelection = useReaderStore((state) => state.setSelection);
   const setError = useReaderStore((state) => state.setError);
-  const translationBound = paper.filePathTranslated !== null && paper.filePathTranslated !== '';
+  const translationBound =
+    paper.filePathTranslated !== null &&
+    paper.filePathTranslated !== '' &&
+    paper.pageCountTranslated !== null;
 
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [pageSizes, setPageSizes] = useState<PageSize[]>([]);
@@ -231,7 +234,7 @@ export function PdfViewer({
       if (!(event.ctrlKey || event.metaKey) || !event.shiftKey) {
         return;
       }
-      if (event.key.toLowerCase() !== 't' || switching || !translationBound) {
+      if (event.repeat || event.key.toLowerCase() !== 't' || switching || !translationBound) {
         return;
       }
       event.preventDefault();
@@ -453,8 +456,14 @@ export function PdfViewer({
   const handleRelocate = async (): Promise<void> => {
     setRelocating(true);
     try {
-      const target = useReaderStore.getState().version;
+      // Repair the file whose load failed; fall back to the displayed version.
+      const state = useReaderStore.getState();
+      const target = state.failedVersion ?? state.version;
       const updated = await window.api.papers.relocate(paper.id, target);
+      // A stale continuation must not act on a paper that is no longer open.
+      if (useReaderStore.getState().paperId !== paper.id) {
+        return;
+      }
       if (updated !== null) {
         setLoadError(null);
         setError(null);
@@ -462,9 +471,15 @@ export function PdfViewer({
         lastMarkedRef.current = null;
         // Reload metadata (path, page count, outline) for the relocated file.
         await open(paper.id);
+        if (useReaderStore.getState().paperId !== paper.id) {
+          return;
+        }
         if (target === 'translated') {
           // open() reset the session to the original; restore the translated view.
           await setVersion('translated');
+          if (useReaderStore.getState().paperId !== paper.id) {
+            return;
+          }
         } else {
           setReloadToken((token) => token + 1);
         }
@@ -587,16 +602,31 @@ export function PdfViewer({
         <div className="viewer-error" role="alert">
           <p className="viewer-error-title">文件缺失或无法打开</p>
           <p className="viewer-error-detail">{errorDetail}</p>
-          <button
-            type="button"
-            className="primary-button relocate-button"
-            disabled={relocating}
-            onClick={() => {
-              void handleRelocate();
-            }}
-          >
-            {relocating ? '正在重新定位…' : '重新定位'}
-          </button>
+          <div className="viewer-error-actions">
+            <button
+              type="button"
+              className="primary-button relocate-button"
+              disabled={relocating}
+              onClick={() => {
+                void handleRelocate();
+              }}
+            >
+              {relocating ? '正在重新定位…' : '重新定位'}
+            </button>
+            {pdf !== null && (
+              <button
+                type="button"
+                className="secondary-button"
+                disabled={relocating}
+                onClick={() => {
+                  setLoadError(null);
+                  setError(null);
+                }}
+              >
+                返回阅读
+              </button>
+            )}
+          </div>
         </div>
       ) : pdf === null ? (
         <p className="pdf-loading">正在加载 PDF…</p>

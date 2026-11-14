@@ -73,6 +73,7 @@ function resetStore(): void {
     zoom: 1,
     error: null,
     selection: null,
+    failedVersion: null,
   });
 }
 
@@ -90,6 +91,7 @@ describe('useReaderStore.open', () => {
     const state = useReaderStore.getState();
     expect(state.paperId).toBe(1);
     expect(state.error).toBe('文件不存在: x');
+    expect(state.failedVersion).toBe('original');
     expect(state.pageCount).toBe(10);
   });
 
@@ -123,6 +125,24 @@ describe('useReaderStore.open', () => {
     const state = useReaderStore.getState();
     expect(state.paperId).toBe(7);
     expect(state.error).toBe('文献不存在: 7');
+    expect(state.failedVersion).toBeNull();
+  });
+
+  it('close 使在途 open 失效', async () => {
+    const pending = deferred<Paper | null>();
+    api.get.mockImplementation(() => pending.promise);
+
+    const opening = useReaderStore.getState().open(1);
+    useReaderStore.getState().close();
+    pending.resolve(makePaper({ lastPageOriginal: 5 }));
+    await opening;
+
+    const state = useReaderStore.getState();
+    expect(state.paperId).toBeNull();
+    expect(state.pageCount).toBe(0);
+    expect(state.currentPage).toBe(1);
+    expect(state.error).toBeNull();
+    expect(api.load).not.toHaveBeenCalled();
   });
 
   it('晚到的旧 open 元数据不会覆盖新的阅读会话', async () => {
@@ -223,6 +243,7 @@ describe('useReaderStore 边界控制', () => {
       zoom: 2,
       error: '出错了',
       selection: { text: '选中文字', pageNo: 4 },
+      failedVersion: 'original',
     });
 
     useReaderStore.getState().close();
@@ -235,6 +256,7 @@ describe('useReaderStore 边界控制', () => {
     expect(state.zoom).toBe(1);
     expect(state.error).toBeNull();
     expect(state.selection).toBeNull();
+    expect(state.failedVersion).toBeNull();
   });
 
   it('setSelection 与 setError 写入状态', () => {

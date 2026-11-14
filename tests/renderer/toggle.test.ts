@@ -42,6 +42,29 @@ function installApi() {
 
 let api: ReturnType<typeof installApi>;
 
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** Lets pending promise continuations (and their awaited IPC calls) run. */
+async function flushAsync(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
 function resetStore(): void {
   useReaderStore.setState({
     paperId: null,
@@ -51,6 +74,7 @@ function resetStore(): void {
     zoom: 1,
     error: null,
     selection: null,
+    failedVersion: null,
   });
 }
 
@@ -117,12 +141,15 @@ describe('useReaderStore.setVersion', () => {
       makePaper({
         filePathTranslated: 'C:/papers/fem-zh.pdf',
         pageCountTranslated: 10,
-        lastPageOriginal: 5,
+        lastPageOriginal: 3,
         lastPageTranslated: 8,
       }),
     );
 
     await useReaderStore.getState().open(1);
+    // Distinct from both lastPageOriginal (3) and lastPageTranslated (8), so
+    // only the same-count sync rule can produce the expected page.
+    useReaderStore.getState().setCurrentPage(5);
     useReaderStore.getState().setZoom(1.5);
     useReaderStore.getState().setSelection({ text: '一段话', pageNo: 5 });
 
@@ -135,6 +162,7 @@ describe('useReaderStore.setVersion', () => {
     expect(state.zoom).toBe(1.5);
     expect(state.selection).toBeNull();
     expect(state.error).toBeNull();
+    expect(state.failedVersion).toBeNull();
     expect(api.load).toHaveBeenCalledWith(1, 'translated');
   });
 
@@ -145,6 +173,7 @@ describe('useReaderStore.setVersion', () => {
 
     const state = useReaderStore.getState();
     expect(state.error).toBe('未绑定译本');
+    expect(state.failedVersion).toBe('translated');
     expect(state.version).toBe('original');
     expect(state.pageCount).toBe(10);
     expect(api.load).not.toHaveBeenCalledWith(1, 'translated');
@@ -165,8 +194,69 @@ describe('useReaderStore.setVersion', () => {
 
     const state = useReaderStore.getState();
     expect(state.error).toBe('译本文件损坏');
+    expect(state.failedVersion).toBe('translated');
     expect(state.version).toBe('original');
     expect(state.pageCount).toBe(10);
     expect(state.currentPage).toBe(5);
+  });
+
+  it('被 open 取代的 setVersion 不会写入旧会话', async () => {
+    api.get.mockResolvedValue(makePaper({ lastPageOriginal: 4 }));
+    await useReaderStore.getState().open(1);
+
+    const pending = deferred<Paper | null>();
+    api.get.mockImplementationOnce(() => pending.promise);
+    const switching = useReaderStore.getState().setVersion('translated');
+    await flushAsync();
+
+    // A new open supersedes the switch while its metadata lookup is pending.
+    await useReaderStore.getState().open(1);
+    pending.resolve(
+      makePaper({ filePathTranslated: 'C:/papers/fem-zh.pdf', pageCountTranslated: 10 }),
+    );
+    await switching;
+
+    const state = useReaderStore.getState();
+    expect(state.version).toBe('original');
+    expect(state.currentPage).toBe(4);
+    expect(state.pageCount).toBe(10);
+    expect(state.error).toBeNull();
+    expect(state.failedVersion).toBeNull();
+    expect(api.load).not.toHaveBeenCalledWith(1, 'translated');
+  });
+
+  it('校验读取期间滚动到的新页码不会被切换覆盖', async () => {
+    api.get.mockResolvedValue(
+      makePaper({
+        filePathTranslated: 'C:/papers/fem-zh.pdf',
+        pageCountTranslated: 10,
+        lastPageOriginal: 3,
+        lastPageTranslated: 8,
+      }),
+    );
+    await useReaderStore.getState().open(1);
+
+    const validating = deferred<{ data: ArrayBuffer; fileName: string }>();
+    api.load.mockImplementationOnce(() => validating.promise);
+    const switching = useReaderStore.getState().setVersion('translated');
+    await flushAsync();
+    useReaderStore.getState().setCurrentPage(7);
+    validating.resolve({ data: new ArrayBuffer(8), fileName: 'fem-zh.pdf' });
+    await switching;
+
+    const state = useReaderStore.getState();
+    expect(state.version).toBe('translated');
+    expect(state.currentPage).toBe(7);
+  });
+
+  it('setError 按当前版本记录失败版本并在清除时重置', () => {
+    useReaderStore.setState({ paperId: 1, version: 'translated', pageCount: 10, currentPage: 3 });
+
+    useReaderStore.getState().setError('无法渲染');
+
+    expect(useReaderStore.getState().failedVersion).toBe('translated');
+    useReaderStore.getState().setError(null);
+    expect(useReaderStore.getState().failedVersion).toBeNull();
+    expect(useReaderStore.getState().error).toBeNull();
   });
 });
