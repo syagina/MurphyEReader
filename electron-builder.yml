@@ -1,0 +1,10 @@
+appId: com.paperlens.app
+productName: PaperLens
+directories:
+  buildResources: build
+  output: dist
+files:
+  - out/**
+  - package.json
+win:
+  target: nsis
