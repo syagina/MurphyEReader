@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { ChatMessage, ChatSendRequest, Conversation } from '@shared/types';
+import { errorMessage } from '../lib/errors';
 
 export interface ChatSendArgs {
   paperId: number;
@@ -36,10 +37,6 @@ export interface ChatState {
   abort(): Promise<void>;
   setFullTextMode(v: boolean): void;
   requestFocus(): void;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /** Keeps the list in the database's `createdAt ASC, id ASC` order. */

@@ -1,4 +1,5 @@
 import { create } from 'zustand';
+import { errorMessage } from '../lib/errors';
 import { clampPage } from '../lib/pdf';
 import { resolveToggleTargetPage } from '../lib/toggle';
 
@@ -72,10 +73,6 @@ function initialFields(): ReaderFields {
     selection: null,
     failedVersion: null,
   };
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function clampZoom(zoom: number): number {
