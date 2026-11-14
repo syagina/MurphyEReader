@@ -350,9 +350,11 @@ export function PdfViewer({
 
   const handleQueryChange = (value: string): void => {
     setSearchQuery(value);
+    // Any edit invalidates an in-flight scan: its results belong to the old
+    // query text and must never set matches or jump the document.
+    searchSeqRef.current += 1;
+    setSearching(false);
     if (value.trim() === '') {
-      searchSeqRef.current += 1;
-      setSearching(false);
       setMatches(null);
       setMatchIndex(0);
     }

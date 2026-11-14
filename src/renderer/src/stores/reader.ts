@@ -30,6 +30,12 @@ export interface ReaderState {
 const MIN_ZOOM = 0.5;
 const MAX_ZOOM = 3;
 
+/**
+ * Monotonic generation for `open`. Overlapping opens are possible when the
+ * user switches papers quickly; only the newest generation may write state.
+ */
+let openSeq = 0;
+
 interface ReaderFields {
   paperId: number | null;
   version: 'original' | 'translated';
@@ -67,9 +73,13 @@ export const useReaderStore = create<ReaderState>()((set, get) => ({
   ...initialFields(),
 
   async open(paperId) {
+    const seq = ++openSeq;
     set({ ...initialFields(), paperId });
     try {
       const paper = await window.api.papers.get(paperId);
+      if (seq !== openSeq) {
+        return;
+      }
       if (paper === null) {
         set({ error: `文献不存在: ${paperId}` });
         return;
@@ -84,9 +94,15 @@ export const useReaderStore = create<ReaderState>()((set, get) => ({
         // PdfViewer re-reads it for pdfjs (double IPC read is accepted in v1).
         await window.api.pdf.load(paperId, 'original');
       } catch (error) {
+        if (seq !== openSeq) {
+          return;
+        }
         set({ error: errorMessage(error) });
       }
     } catch (error) {
+      if (seq !== openSeq) {
+        return;
+      }
       // Metadata lookup failures (e.g. DB errors) surface in the viewer error UI.
       set({ error: errorMessage(error) });
     }

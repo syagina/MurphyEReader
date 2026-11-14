@@ -39,6 +39,29 @@ function installApi() {
   return { get, load };
 }
 
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
+/** Lets pending promise continuations (and their awaited IPC calls) run. */
+async function flushAsync(): Promise<void> {
+  await new Promise<void>((resolve) => {
+    setTimeout(resolve, 0);
+  });
+}
+
 let api: ReturnType<typeof installApi>;
 
 function resetStore(): void {
@@ -100,6 +123,71 @@ describe('useReaderStore.open', () => {
     const state = useReaderStore.getState();
     expect(state.paperId).toBe(7);
     expect(state.error).toBe('文献不存在: 7');
+  });
+
+  it('晚到的旧 open 元数据不会覆盖新的阅读会话', async () => {
+    const paperA = makePaper({ id: 1, pageCountOriginal: 10, lastPageOriginal: 4 });
+    const paperB = makePaper({ id: 2, pageCountOriginal: 20, lastPageOriginal: 7 });
+    const getA = deferred<Paper | null>();
+    const getB = deferred<Paper | null>();
+    const loadB = deferred<{ data: ArrayBuffer; fileName: string }>();
+    api.get.mockImplementation((id) => (id === 1 ? getA.promise : getB.promise));
+    api.load.mockImplementation((id) =>
+      id === 1 ? Promise.reject(new Error('文件不存在: 1')) : loadB.promise,
+    );
+
+    const openA = useReaderStore.getState().open(1);
+    const openB = useReaderStore.getState().open(2);
+    getB.resolve(paperB);
+    await flushAsync();
+    loadB.resolve({ data: new ArrayBuffer(8), fileName: 'b.pdf' });
+    await openB;
+
+    expect(useReaderStore.getState().paperId).toBe(2);
+    expect(useReaderStore.getState().error).toBeNull();
+
+    // A's metadata only arrives after B has fully opened and must be ignored.
+    getA.resolve(paperA);
+    await openA;
+
+    const state = useReaderStore.getState();
+    expect(state.paperId).toBe(2);
+    expect(state.pageCount).toBe(20);
+    expect(state.currentPage).toBe(7);
+    expect(state.error).toBeNull();
+    // The superseded session stops before doing its validation read.
+    expect(api.load).not.toHaveBeenCalledWith(1, 'original');
+  });
+
+  it('晚到的旧 pdf.load 失败不会污染新会话', async () => {
+    const paperA = makePaper({ id: 1, pageCountOriginal: 10, lastPageOriginal: 4 });
+    const paperB = makePaper({ id: 2, pageCountOriginal: 20, lastPageOriginal: 7 });
+    const getA = deferred<Paper | null>();
+    const loadA = deferred<{ data: ArrayBuffer; fileName: string }>();
+    const getB = deferred<Paper | null>();
+    const loadB = deferred<{ data: ArrayBuffer; fileName: string }>();
+    api.get.mockImplementation((id) => (id === 1 ? getA.promise : getB.promise));
+    api.load.mockImplementation((id) => (id === 1 ? loadA.promise : loadB.promise));
+
+    const openA = useReaderStore.getState().open(1);
+    getA.resolve(paperA);
+    await flushAsync(); // A restores its metadata and starts its validation read.
+
+    const openB = useReaderStore.getState().open(2);
+    getB.resolve(paperB);
+    await flushAsync();
+    loadB.resolve({ data: new ArrayBuffer(8), fileName: 'b.pdf' });
+    await openB;
+
+    loadA.reject(new Error('文件不存在: 1'));
+    await openA;
+
+    const state = useReaderStore.getState();
+    expect(api.load).toHaveBeenCalledWith(1, 'original');
+    expect(state.paperId).toBe(2);
+    expect(state.pageCount).toBe(20);
+    expect(state.currentPage).toBe(7);
+    expect(state.error).toBeNull();
   });
 });
 
