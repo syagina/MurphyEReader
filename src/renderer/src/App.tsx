@@ -1,11 +1,18 @@
 import { useState } from 'react';
 import type { Paper } from '@shared/types';
 import { LibraryPanel } from './components/LibraryPanel';
+import { OutlinePanel } from './components/OutlinePanel';
+import { PdfViewer } from './components/PdfViewer';
+import { useReaderStore } from './stores/reader';
 
 export default function App(): React.JSX.Element {
   const [openedPaper, setOpenedPaper] = useState<Paper | null>(null);
   const [libraryCollapsed, setLibraryCollapsed] = useState(false);
   const [aiCollapsed, setAiCollapsed] = useState(false);
+
+  const handleOutlineJump = (pageNo: number): void => {
+    useReaderStore.getState().jumpToPage(pageNo);
+  };
 
   return (
     <div className="app-shell">
@@ -28,13 +35,21 @@ export default function App(): React.JSX.Element {
         {!libraryCollapsed && <LibraryPanel onOpen={setOpenedPaper} />}
       </aside>
 
-      <main className="reading-area" aria-label="阅读区">
-        <h1 className="reading-title">{openedPaper === null ? 'PaperLens' : openedPaper.title}</h1>
-        <p className="placeholder-text">
-          {openedPaper === null
-            ? '从左侧文献库打开一篇 PDF 开始阅读。'
-            : '阅读器将在后续版本中在此显示 PDF 内容。'}
-        </p>
+      <main
+        className={openedPaper === null ? 'reading-area' : 'reading-area reader-open'}
+        aria-label="阅读区"
+      >
+        {openedPaper === null ? (
+          <>
+            <h1 className="reading-title">PaperLens</h1>
+            <p className="placeholder-text">从左侧文献库打开一篇 PDF 开始阅读。</p>
+          </>
+        ) : (
+          <div className="reader-layout">
+            <OutlinePanel outline={openedPaper.outline} onJump={handleOutlineJump} />
+            <PdfViewer paper={openedPaper} />
+          </div>
+        )}
       </main>
 
       <aside className={aiCollapsed ? 'ai-panel collapsed' : 'ai-panel'} aria-label="AI 面板">
