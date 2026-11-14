@@ -21,7 +21,12 @@ export interface ReaderState {
    * relocation action targets it instead of the version currently displayed.
    */
   failedVersion: 'original' | 'translated' | null;
-  open(paperId: number): Promise<void>;
+  /**
+   * Opens a paper in the reader. `initialPage`, when given (e.g. a global
+   * search hit), wins over the paper's `lastPageOriginal` for the restored
+   * page; both are clamped to the paper's page count.
+   */
+  open(paperId: number, initialPage?: number): Promise<void>;
   /**
    * Switches the open reader between the original PDF and its translation.
    * Only `version`, `pageCount` and `currentPage` change; a failed switch keeps
@@ -85,7 +90,7 @@ function clampZoom(zoom: number): number {
 export const useReaderStore = create<ReaderState>()((set, get) => ({
   ...initialFields(),
 
-  async open(paperId) {
+  async open(paperId, initialPage) {
     const seq = ++openSeq;
     set({ ...initialFields(), paperId });
     try {
@@ -100,7 +105,10 @@ export const useReaderStore = create<ReaderState>()((set, get) => ({
       const pageCount = paper.pageCountOriginal;
       set({
         pageCount,
-        currentPage: clampPage(paper.lastPageOriginal || 1, pageCount),
+        currentPage: clampPage(
+          initialPage !== undefined ? initialPage : paper.lastPageOriginal || 1,
+          pageCount,
+        ),
       });
       try {
         // Validation read only. The buffer is intentionally not kept in state:

@@ -117,6 +117,27 @@ describe('useReaderStore.open', () => {
     expect(useReaderStore.getState().currentPage).toBe(10);
   });
 
+  it('传入初始页码时优先于上次阅读页码', async () => {
+    api.get.mockResolvedValue(makePaper({ pageCountOriginal: 10, lastPageOriginal: 3 }));
+
+    await useReaderStore.getState().open(1, 6);
+
+    expect(useReaderStore.getState().currentPage).toBe(6);
+  });
+
+  it('初始页码按总页数钳制', async () => {
+    api.get.mockResolvedValue(makePaper({ pageCountOriginal: 10, lastPageOriginal: 3 }));
+
+    await useReaderStore.getState().open(1, 99);
+    expect(useReaderStore.getState().currentPage).toBe(10);
+
+    await useReaderStore.getState().open(1, 0);
+    expect(useReaderStore.getState().currentPage).toBe(1);
+
+    await useReaderStore.getState().open(1, Number.NaN);
+    expect(useReaderStore.getState().currentPage).toBe(1);
+  });
+
   it('文献不存在时写入错误并保留 paperId', async () => {
     api.get.mockResolvedValue(null);
 

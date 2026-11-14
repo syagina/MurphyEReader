@@ -105,6 +105,22 @@ function installApi() {
   };
 }
 
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve(value: T): void;
+  reject(error: unknown): void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (error: unknown) => void;
+  const promise = new Promise<T>((res, rej) => {
+    resolve = res;
+    reject = rej;
+  });
+  return { promise, resolve, reject };
+}
+
 let api: ReturnType<typeof installApi>;
 
 function resetStore(): void {
@@ -186,6 +202,26 @@ describe('useChatStore.loadForPaper', () => {
 
     expect(useChatStore.getState().activeConversationId).toBe(1);
     expect(api.messages.list).toHaveBeenCalledWith(1);
+  });
+
+  it('在途 loadForPaper 不会覆盖显式打开的会话', async () => {
+    const conversations = deferred<Conversation[]>();
+    api.conversations.list.mockImplementation(() => conversations.promise);
+    const targetMessages = [makeMessage(5, 2, { role: 'user', content: '被搜索定位的消息' })];
+    api.messages.list.mockImplementation(async (conversationId) =>
+      conversationId === 2 ? targetMessages : [],
+    );
+
+    // ChatPanel mounts and starts loading before App locates the search hit.
+    const loading = useChatStore.getState().loadForPaper(1);
+    await useChatStore.getState().openConversation(1, 2);
+
+    conversations.resolve([makeConversation(1), makeConversation(2)]);
+    await loading;
+
+    const state = useChatStore.getState();
+    expect(state.activeConversationId).toBe(2);
+    expect(state.messages).toEqual(targetMessages);
   });
 
   it('当前会话已不存在时选择最新会话', async () => {
