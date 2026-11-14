@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { Note, Paper } from '@shared/types';
-import { buildPaperNotesMarkdown } from '@renderer/lib/export-markdown';
+import {
+  buildNotesExportFileName,
+  buildPaperNotesMarkdown,
+} from '@renderer/lib/export-markdown';
 
 function makePaper(overrides: Partial<Paper> = {}): Paper {
   return {
@@ -125,5 +128,27 @@ describe('buildPaperNotesMarkdown', () => {
     expect(conceptSection).not.toContain('总结乙');
     expect(summarySection).toContain('总结乙');
     expect(summarySection).not.toContain('概念甲');
+  });
+});
+
+describe('buildNotesExportFileName', () => {
+  it('普通标题保留原名并追加笔记后缀', () => {
+    expect(buildNotesExportFileName({ title: '有限元方法导论' })).toBe(
+      '有限元方法导论-笔记.md',
+    );
+  });
+
+  it('替换 Windows 非法字符与控制字符且保留后缀', () => {
+    const name = buildNotesExportFileName({
+      title: 'A/B: C? <D>|E*F"G\\H\u0001',
+    });
+
+    expect(name).not.toMatch(/[<>:"/\\|?*\u0000-\u001f]/);
+    expect(name.endsWith('-笔记.md')).toBe(true);
+    expect(name.startsWith('A_B_ C_ _D_E_F_G_H')).toBe(true);
+  });
+
+  it('标题只有非法字符时仍返回可用文件名', () => {
+    expect(buildNotesExportFileName({ title: ':?*"<>|/\\' })).toBe('笔记-笔记.md');
   });
 });

@@ -6,6 +6,24 @@ export interface NoteTypeSection {
   heading: string;
 }
 
+/** Windows refuses these characters in file names; controls are also unsafe. */
+const ILLEGAL_FILENAME_CHARS = /[<>:"/\\|?*\u0000-\u001f\u007f]+/g;
+
+/**
+ * Builds the save-dialog default name for a paper's notes export. Illegal
+ * Windows filename characters are replaced with `_`; leading/trailing dots,
+ * underscores and spaces are stripped. A title with no usable characters
+ * falls back to `笔记`, so the name always stays usable.
+ */
+export function buildNotesExportFileName(paper: Pick<Paper, 'title'>): string {
+  const sanitized = paper.title
+    .replace(ILLEGAL_FILENAME_CHARS, '_')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/^[._\s]+|[._\s]+$/g, '');
+  return `${sanitized === '' ? '笔记' : sanitized}-笔记.md`;
+}
+
 /**
  * Display order and headings shared by the notes panel and the Markdown
  * export: 概念卡, 总结, 笔记, 创新点.

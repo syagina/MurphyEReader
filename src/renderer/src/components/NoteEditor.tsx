@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Note } from '@shared/types';
+import { parseTags } from '../lib/format';
 import { useNotesStore } from '../stores/notes';
 import { MarkdownView } from './MarkdownView';
 
@@ -9,13 +10,6 @@ interface NoteEditorProps {
 }
 
 type EditorMode = 'edit' | 'preview';
-
-function parseTags(input: string): string[] {
-  return input
-    .split(/[,，]/)
-    .map((tag) => tag.trim())
-    .filter((tag) => tag !== '');
-}
 
 export function NoteEditor({ note, onClose }: NoteEditorProps): React.JSX.Element {
   const update = useNotesStore((state) => state.update);

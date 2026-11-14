@@ -172,6 +172,21 @@ describe('useNotesStore.load', () => {
 
     expect(useNotesStore.getState().error).toBe('AI 请求失败');
   });
+
+  it('被取代的加载结果不会覆盖较新的加载结果', async () => {
+    const stale = deferred<Note[]>();
+    api.list.mockReturnValueOnce(stale.promise).mockResolvedValueOnce([makeNote(2)]);
+
+    const first = useNotesStore.getState().load(1);
+    const second = useNotesStore.getState().load(1);
+    await second;
+    stale.resolve([makeNote(9)]);
+    await first;
+
+    const state = useNotesStore.getState();
+    expect(state.paperId).toBe(1);
+    expect(state.notes.map((note) => note.id)).toEqual([2]);
+  });
 });
 
 describe('useNotesStore.create', () => {
@@ -207,6 +222,23 @@ describe('useNotesStore.create', () => {
 
     const state = useNotesStore.getState();
     expect(state.error).toBe('写入失败');
+    expect(state.notes.map((note) => note.id)).toEqual([1]);
+    expect(state.selectedNoteId).toBe(1);
+  });
+
+  it('为其他文献创建笔记时不插入当前过滤列表也不选中', async () => {
+    useNotesStore.setState({ paperId: 1, notes: [makeNote(1)], selectedNoteId: 1 });
+    api.create.mockResolvedValue(makeNote(99, { paperId: 2, updatedAt: 5_000 }));
+
+    await useNotesStore.getState().create({
+      paperId: 2,
+      type: 'manual',
+      title: '另一篇',
+      contentMd: '',
+      tags: [],
+    });
+
+    const state = useNotesStore.getState();
     expect(state.notes.map((note) => note.id)).toEqual([1]);
     expect(state.selectedNoteId).toBe(1);
   });

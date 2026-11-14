@@ -24,3 +24,14 @@ export function formatTimestamp(timestamp: number): string {
     date.getHours(),
   )}:${pad(date.getMinutes())}`;
 }
+
+/**
+ * Splits a comma-separated tag input. Both ASCII and Chinese commas separate
+ * tags; surrounding whitespace is trimmed and empty entries are dropped.
+ */
+export function parseTags(input: string): string[] {
+  return input
+    .split(/[,，]/)
+    .map((tag) => tag.trim())
+    .filter((tag) => tag !== '');
+}

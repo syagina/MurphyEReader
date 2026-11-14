@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Paper } from '@shared/types';
-import { formatPaperMeta } from '../lib/format';
+import { formatPaperMeta, parseTags } from '../lib/format';
 import { useLibraryStore } from '../stores/library';
 import { useNotesStore } from '../stores/notes';
 
@@ -18,13 +18,6 @@ interface EditDraft {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '操作失败';
-}
-
-function parseTags(input: string): string[] {
-  return input
-    .split(/[,，]/)
-    .map((tag) => tag.trim())
-    .filter((tag) => tag !== '');
 }
 
 export function LibraryPanel({ onOpen }: LibraryPanelProps): React.JSX.Element {

@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Paper } from '@shared/types';
+import { errorMessage } from '../lib/errors';
 import { useChatStore } from '../stores/chat';
 import { useReaderStore } from '../stores/reader';
 import type { ReaderSelection } from '../stores/reader';
@@ -7,10 +8,6 @@ import { MarkdownView } from './MarkdownView';
 
 interface ChatPanelProps {
   paper: Paper;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function truncate(text: string, max: number): string {

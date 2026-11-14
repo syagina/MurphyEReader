@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { PaperLensApi } from '@shared/ipc';
 import type { Note } from '@shared/types';
+import { errorMessage } from '../lib/errors';
 
 export type NoteKind = Parameters<PaperLensApi['notes']['generate']>[0];
 export type NoteCreateInput = Parameters<PaperLensApi['notes']['create']>[0];
@@ -22,10 +23,6 @@ export interface NotesState {
   generate(kind: NoteKind, params: NoteGenerateParams): Promise<Note | null>;
   selectNote(id: number | null): void;
   clearError(): void;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 /** Matches the database order: `updated_at DESC, id DESC`. */

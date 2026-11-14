@@ -9,6 +9,7 @@ import {
   findInDocument,
   getSelectionInPage,
 } from '../lib/pdf';
+import { errorMessage } from '../lib/errors';
 import { useReaderStore } from '../stores/reader';
 import type { ReaderSelection } from '../stores/reader';
 import { useLibraryStore } from '../stores/library';
@@ -35,10 +36,6 @@ interface PendingMarkRead {
 interface ToolbarPosition {
   top: number;
   left: number;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 export function PdfViewer({

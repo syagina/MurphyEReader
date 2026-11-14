@@ -1,6 +1,11 @@
 import { useEffect, useState } from 'react';
 import type { Paper } from '@shared/types';
-import { NOTE_TYPE_SECTIONS, buildPaperNotesMarkdown } from '../lib/export-markdown';
+import { errorMessage } from '../lib/errors';
+import {
+  NOTE_TYPE_SECTIONS,
+  buildNotesExportFileName,
+  buildPaperNotesMarkdown,
+} from '../lib/export-markdown';
 import { formatTimestamp } from '../lib/format';
 import { useNotesStore } from '../stores/notes';
 import { NoteEditor } from './NoteEditor';
@@ -10,10 +15,6 @@ interface NotesPanelProps {
 }
 
 const NEW_NOTE_TITLE = '未命名笔记';
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
-}
 
 export function NotesPanel({ paper }: NotesPanelProps): React.JSX.Element {
   const notes = useNotesStore((state) => state.notes);
@@ -60,7 +61,7 @@ export function NotesPanel({ paper }: NotesPanelProps): React.JSX.Element {
     setExporting(true);
     try {
       const markdown = buildPaperNotesMarkdown(paper, notes);
-      await window.api.exportFile.save(`${paper.title}-笔记.md`, markdown);
+      await window.api.exportFile.save(buildNotesExportFileName(paper), markdown);
     } catch (exportError) {
       setLocalError(errorMessage(exportError));
     } finally {
