@@ -346,6 +346,130 @@ describe('startChat streaming', () => {
     expect(rows.filter((row) => row.role === 'assistant')).toHaveLength(0);
   });
 
+  it('流式失败后重发完全相同的问题不重复写入用户消息且历史不含重复问题', async () => {
+    const { paper, conversationId } = setupPaper();
+    const question = '这篇论文讲了什么？';
+    let callCount = 0;
+    let retryMessages: AiMessage[] = [];
+    const ai: Pick<AiClient, 'streamChat'> = {
+      async streamChat(messages) {
+        callCount += 1;
+        if (callCount === 1) {
+          throw new Error('503 服务不可用');
+        }
+        retryMessages = messages;
+        return '重试后的回答';
+      },
+    };
+    const sink = createEventSink();
+    const deps = makeDeps(ai, sink);
+    const request = makeRequest(paper, conversationId, {
+      selectionText: '选中的文本',
+      currentPageNo: 1,
+    });
+
+    const errorPromise = sink.waitFor('chat:error');
+    await startChat(deps, request);
+    await errorPromise;
+    expect(listMessages(db, conversationId).map((row) => row.role)).toEqual(['user']);
+
+    const donePromise = sink.waitFor('chat:done');
+    await startChat(deps, request);
+    await donePromise;
+
+    const rows = listMessages(db, conversationId);
+    expect(rows.map((row) => row.role)).toEqual(['user', 'assistant']);
+    expect(rows.filter((row) => row.role === 'user')).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      content: question,
+      selectionText: '选中的文本',
+      pageNo: 1,
+    });
+    expect(rows[1].content).toBe('重试后的回答');
+
+    // The retried question is passed once as the current question and is not
+    // replayed from history.
+    expect(retryMessages[0].role).toBe('system');
+    expect(retryMessages.slice(1)).toEqual([{ role: 'user', content: question }]);
+    expect(
+      retryMessages.filter((message) => message.content === question),
+    ).toHaveLength(1);
+    expect(retryMessages.at(-1)).toEqual({ role: 'user', content: question });
+  });
+
+  it('内容相同但选文不同的追问仍会追加新的用户消息', async () => {
+    const { paper, conversationId } = setupPaper();
+    const question = '这篇论文讲了什么？';
+    let callCount = 0;
+    const ai: Pick<AiClient, 'streamChat'> = {
+      async streamChat() {
+        callCount += 1;
+        if (callCount === 1) {
+          throw new Error('429 请求过于频繁');
+        }
+        return '回答';
+      },
+    };
+    const sink = createEventSink();
+    const deps = makeDeps(ai, sink);
+
+    const errorPromise = sink.waitFor('chat:error');
+    await startChat(
+      deps,
+      makeRequest(paper, conversationId, { selectionText: '第一段选文' }),
+    );
+    await errorPromise;
+
+    const donePromise = sink.waitFor('chat:done');
+    await startChat(
+      deps,
+      makeRequest(paper, conversationId, { selectionText: '第二段选文' }),
+    );
+    await donePromise;
+
+    const userRows = listMessages(db, conversationId).filter(
+      (row) => row.role === 'user',
+    );
+    expect(userRows.map((row) => row.selectionText)).toEqual([
+      '第一段选文',
+      '第二段选文',
+    ]);
+    expect(userRows.map((row) => row.content)).toEqual([question, question]);
+  });
+
+  it('不同的追问仍会追加新的用户消息', async () => {
+    const { paper, conversationId } = setupPaper();
+    let callCount = 0;
+    const ai: Pick<AiClient, 'streamChat'> = {
+      async streamChat() {
+        callCount += 1;
+        if (callCount === 1) {
+          throw new Error('超时');
+        }
+        return '回答';
+      },
+    };
+    const sink = createEventSink();
+    const deps = makeDeps(ai, sink);
+
+    const errorPromise = sink.waitFor('chat:error');
+    await startChat(deps, makeRequest(paper, conversationId));
+    await errorPromise;
+
+    const donePromise = sink.waitFor('chat:done');
+    await startChat(
+      deps,
+      makeRequest(paper, conversationId, { question: '另一个追问？' }),
+    );
+    await donePromise;
+
+    const rows = listMessages(db, conversationId);
+    expect(rows.map((row) => row.role)).toEqual(['user', 'user', 'assistant']);
+    expect(
+      rows.filter((row) => row.role === 'user').map((row) => row.content),
+    ).toEqual(['这篇论文讲了什么？', '另一个追问？']);
+  });
+
   it('abortChat 中止流式请求且不保存 assistant 消息', async () => {
     const { paper, conversationId } = setupPaper();
     let capturedSignal: AbortSignal | undefined;

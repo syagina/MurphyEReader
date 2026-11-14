@@ -118,6 +118,7 @@ export function ChatPanel({ paper }: ChatPanelProps): React.JSX.Element {
   const renameConversation = useChatStore((state) => state.renameConversation);
   const removeConversation = useChatStore((state) => state.removeConversation);
   const send = useChatStore((state) => state.send);
+  const retryLast = useChatStore((state) => state.retryLast);
   const abort = useChatStore((state) => state.abort);
   const setFullTextMode = useChatStore((state) => state.setFullTextMode);
 
@@ -181,6 +182,14 @@ export function ChatPanel({ paper }: ChatPanelProps): React.JSX.Element {
   };
 
   const submit = (): void => {
+    // Mirror the 发送 button's disabled state so Ctrl/Cmd+Enter cannot start a
+    // second request while one is streaming.
+    if (activeRequestId !== null) {
+      return;
+    }
+    // A conversation-management error must not mask the chat error that the
+    // next failed send reports (or hide its 重发 action).
+    setPanelError(null);
     const value = question.trim();
     if (value === '') {
       return;
@@ -203,7 +212,7 @@ export function ChatPanel({ paper }: ChatPanelProps): React.JSX.Element {
     if (lastFailedSendArgs === null) {
       return;
     }
-    void send(lastFailedSendArgs);
+    void retryLast();
   };
 
   const handleSelect = (value: string): void => {

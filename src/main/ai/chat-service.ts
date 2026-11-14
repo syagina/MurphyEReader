@@ -78,17 +78,33 @@ function prepareChat(
     // setup failure leaves neither a user nor an assistant message behind.
     const setup = deps.db.transaction(() => {
       const history = listMessages(deps.db, req.conversationId);
-      appendMessage(deps.db, {
-        conversationId: req.conversationId,
-        role: 'user',
-        content: req.question,
-        selectionText: req.selectionText,
-        pageNo: req.currentPageNo,
-      });
+      // A stream-stage failure or abort leaves the unanswered user message as
+      // the conversation tail. Retrying the identical question must not append
+      // a duplicate row (which would also be replayed as context on later
+      // turns), and the trailing question must stay out of the history because
+      // the current question is passed to the model separately.
+      const selectionText = req.selectionText ?? null;
+      const pageNo = req.currentPageNo ?? null;
+      const last = history.length > 0 ? history[history.length - 1] : null;
+      const isRetry =
+        last !== null &&
+        last.role === 'user' &&
+        last.content === req.question &&
+        last.selectionText === selectionText &&
+        last.pageNo === pageNo;
+      if (!isRetry) {
+        appendMessage(deps.db, {
+          conversationId: req.conversationId,
+          role: 'user',
+          content: req.question,
+          selectionText: req.selectionText,
+          pageNo: req.currentPageNo,
+        });
+      }
       return assembleChatContext({
         paper,
         pages,
-        history,
+        history: isRetry ? history.slice(0, -1) : history,
         question: req.question,
         selectionText: req.selectionText,
         currentPageNo: req.currentPageNo,

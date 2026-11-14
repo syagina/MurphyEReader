@@ -147,6 +147,22 @@ describe('useChatStore.loadForPaper', () => {
     expect(api.messages.list).toHaveBeenCalledWith(2);
   });
 
+  it('会话列表按 createdAt 升序保存并选择最新会话', async () => {
+    const conversations = [
+      makeConversation(3, { createdAt: 3000 }),
+      makeConversation(1, { createdAt: 1000 }),
+      makeConversation(2, { createdAt: 2000 }),
+    ];
+    api.conversations.list.mockResolvedValue(conversations);
+    api.messages.list.mockResolvedValue([]);
+
+    await useChatStore.getState().loadForPaper(1);
+
+    const state = useChatStore.getState();
+    expect(state.conversations.map((conversation) => conversation.id)).toEqual([1, 2, 3]);
+    expect(state.activeConversationId).toBe(3);
+  });
+
   it('没有会话时保持空状态', async () => {
     await useChatStore.getState().loadForPaper(1);
 
@@ -301,6 +317,23 @@ describe('useChatStore.send', () => {
     expect(state.activeRequestId).toBeNull();
   });
 
+  it('chat.send IPC 失败后重发会重新显示问题且只显示一次', async () => {
+    api.conversations.list.mockResolvedValue([makeConversation(1)]);
+    await useChatStore.getState().loadForPaper(1);
+    api.chat.send.mockRejectedValueOnce(new Error('IPC 失败'));
+    await useChatStore.getState().send({ paperId: 1, question: '问题' });
+    expect(useChatStore.getState().messages).toHaveLength(0);
+
+    api.chat.send.mockResolvedValueOnce({ requestId: 'r2' });
+    await useChatStore.getState().retryLast();
+
+    const state = useChatStore.getState();
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0]).toMatchObject({ role: 'user', content: '问题' });
+    expect(state.error).toBeNull();
+    expect(state.activeRequestId).toBe('r2');
+  });
+
   it('空白问题不发送', async () => {
     await useChatStore.getState().send({ paperId: 1, question: '   ' });
 
@@ -401,7 +434,61 @@ describe('useChatStore 流式事件', () => {
     expect(state.error).toBe('余额不足');
     expect(state.streamingByRequest).toEqual({});
     expect(state.activeRequestId).toBeNull();
-    expect(state.messages.every((message) => message.role !== 'assistant')).toBe(true);
+    // The failed question stays visible exactly once for 重发.
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0]).toMatchObject({ role: 'user', content: '问题' });
+  });
+
+  it('重发复用原请求载荷且不追加第二条乐观消息', async () => {
+    await setupConversation();
+    api.chat.send.mockResolvedValueOnce({ requestId: 'r1' });
+    await useChatStore.getState().send({
+      paperId: 1,
+      question: '问题',
+      selectionText: '选文',
+      pageNo: 2,
+    });
+    api.emitError({ requestId: 'r1', error: '余额不足' });
+
+    let state = useChatStore.getState();
+    expect(state.messages).toHaveLength(1);
+    expect(state.lastFailedSendArgs).toMatchObject({
+      paperId: 1,
+      conversationId: 1,
+      question: '问题',
+      selectionText: '选文',
+      currentPageNo: 2,
+      fullTextMode: false,
+    });
+
+    api.chat.send.mockResolvedValueOnce({ requestId: 'r2' });
+    await useChatStore.getState().retryLast();
+
+    expect(api.chat.send).toHaveBeenCalledTimes(2);
+    expect(api.chat.send.mock.calls[1][0]).toEqual(api.chat.send.mock.calls[0][0]);
+    state = useChatStore.getState();
+    expect(state.messages).toHaveLength(1);
+    expect(state.messages[0]).toMatchObject({ role: 'user', content: '问题' });
+    expect(state.error).toBeNull();
+    expect(state.activeRequestId).toBe('r2');
+  });
+
+  it('切换会话后不会把旧问题重发到新会话', async () => {
+    useChatStore.setState({
+      paperId: 1,
+      conversations: [makeConversation(1), makeConversation(2)],
+      activeConversationId: 2,
+      lastFailedSendArgs: {
+        paperId: 1,
+        conversationId: 1,
+        question: '问题',
+        fullTextMode: false,
+      },
+    });
+
+    await useChatStore.getState().retryLast();
+
+    expect(api.chat.send).not.toHaveBeenCalled();
   });
 
   it('后台会话的 error 只告警，不改当前界面', async () => {
@@ -514,17 +601,21 @@ describe('useChatStore 会话管理', () => {
 
     expect(api.conversations.create).toHaveBeenCalledWith(1, '新对话');
     const state = useChatStore.getState();
-    expect(state.conversations[0].id).toBe(10);
+    // Newest-last invariant: the new conversation is appended, not prepended.
+    expect(state.conversations.map((conversation) => conversation.id)).toEqual([1, 10]);
     expect(state.activeConversationId).toBe(10);
     expect(state.messages).toEqual([]);
   });
 
   it('openConversation 载入消息并停止展示旧流', async () => {
-    useChatStore.setState({
-      paperId: 1,
-      conversations: [makeConversation(1), makeConversation(2)],
-      activeConversationId: 1,
-    });
+    api.conversations.list.mockResolvedValue([makeConversation(1), makeConversation(2)]);
+    api.messages.list.mockResolvedValue([]);
+    await useChatStore.getState().loadForPaper(1);
+    useChatStore.setState({ activeConversationId: 1 });
+    api.chat.send.mockResolvedValue({ requestId: 'r1' });
+    await useChatStore.getState().send({ paperId: 1, question: '问题' });
+    expect(useChatStore.getState().activeRequestId).toBe('r1');
+
     const messages = [makeMessage(9, 2)];
     api.messages.list.mockResolvedValue(messages);
 
