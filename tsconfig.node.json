@@ -14,7 +14,6 @@
     "skipLibCheck": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noImplicitAny": false,
     "noImplicitReturns": true,
     "types": ["node"],
     "baseUrl": ".",

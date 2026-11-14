@@ -14,7 +14,6 @@
     "skipLibCheck": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true,
-    "noImplicitAny": false,
     "noImplicitReturns": true,
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "baseUrl": ".",
