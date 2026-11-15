@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   ChatSendRequest,
   Conversation,
+  ExportContext,
   Folder,
   FolderImportSummary,
   ImportPaperResult,
@@ -87,11 +88,24 @@ export interface PaperLensApi {
     global(query: string): Promise<SearchResult[]>;
   };
   exportFile: {
-    save(suggestedName: string, content: string): Promise<string | null>;
+    save(
+      suggestedName: string,
+      content: string,
+      context?: ExportContext,
+    ): Promise<string | null>;
     /** Writes a generated .docx after asking the user where to save it. */
-    saveDocx(suggestedName: string, data: Uint8Array): Promise<string | null>;
+    saveDocx(
+      suggestedName: string,
+      data: Uint8Array,
+      context?: ExportContext,
+    ): Promise<string | null>;
     /** Renders Markdown to PDF in a hidden window, then asks where to save it. */
-    printPdf(suggestedName: string, title: string, markdown: string): Promise<string | null>;
+    printPdf(
+      suggestedName: string,
+      title: string,
+      markdown: string,
+      context?: ExportContext,
+    ): Promise<string | null>;
     /** Hidden export window only: fetches the job its query token refers to. */
     getJob(token: string): Promise<PdfExportJob | null>;
     /** Hidden export window only: reports that fonts/layout are ready to print. */

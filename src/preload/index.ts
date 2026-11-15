@@ -60,12 +60,12 @@ const api: PaperLensApi = {
     global: (query) => ipcRenderer.invoke('search:global', query),
   },
   exportFile: {
-    save: (suggestedName, content) =>
-      ipcRenderer.invoke('export:save', suggestedName, content),
-    saveDocx: (suggestedName, data) =>
-      ipcRenderer.invoke('export:saveDocx', suggestedName, data),
-    printPdf: (suggestedName, title, markdown) =>
-      ipcRenderer.invoke('export:printPdf', suggestedName, title, markdown),
+    save: (suggestedName, content, context) =>
+      ipcRenderer.invoke('export:save', suggestedName, content, context),
+    saveDocx: (suggestedName, data, context) =>
+      ipcRenderer.invoke('export:saveDocx', suggestedName, data, context),
+    printPdf: (suggestedName, title, markdown, context) =>
+      ipcRenderer.invoke('export:printPdf', suggestedName, title, markdown, context),
     getJob: (token) => ipcRenderer.invoke('export:getJob', token),
     ready: (token) => ipcRenderer.invoke('export:ready', token),
     fail: (token, message) => ipcRenderer.invoke('export:fail', token, message),

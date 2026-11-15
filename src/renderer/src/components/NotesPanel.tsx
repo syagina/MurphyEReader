@@ -68,6 +68,7 @@ export function NotesPanel({ paper }: NotesPanelProps): React.JSX.Element {
         `《${paper.title}》笔记`,
         markdown,
         exportFormat,
+        { scope: 'all' },
       );
     } catch (exportError) {
       setLocalError(errorMessage(exportError));

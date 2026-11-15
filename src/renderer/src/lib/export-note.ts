@@ -1,4 +1,4 @@
-import type { ExportFormat } from '@shared/types';
+import type { ExportContext, ExportFormat } from '@shared/types';
 
 export const EXPORT_FORMAT_LABELS: Record<ExportFormat, string> = {
   pdf: 'PDF',
@@ -16,16 +16,17 @@ export async function exportNoteDocument(
   title: string,
   markdown: string,
   format: ExportFormat,
+  context?: ExportContext,
 ): Promise<string | null> {
   switch (format) {
     case 'md':
-      return window.api.exportFile.save(fileName, markdown);
+      return window.api.exportFile.save(fileName, markdown, context);
     case 'pdf':
-      return window.api.exportFile.printPdf(fileName, title, markdown);
+      return window.api.exportFile.printPdf(fileName, title, markdown, context);
     case 'docx': {
       const { buildNotesDocx } = await import('./docx-export');
       const data = await buildNotesDocx(markdown, title);
-      return window.api.exportFile.saveDocx(fileName, data);
+      return window.api.exportFile.saveDocx(fileName, data, context);
     }
   }
 }

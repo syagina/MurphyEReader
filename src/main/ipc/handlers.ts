@@ -10,6 +10,7 @@ import type {
   AppSettings,
   AppSettingsUpdate,
   ChatSendRequest,
+  ExportContext,
   LegacyMigrationSummary,
   NoteType,
   PaperUpdatePatch,
@@ -28,6 +29,7 @@ import { createFolder, getFolder, listFolders, removeFolder, renameFolder } from
 import { createNote, deleteNote, listNotes, updateNote } from '../db/notes';
 import { getPaper, listPapers, markRead, updatePaper } from '../db/papers';
 import { searchGlobal } from '../db/search';
+import { prepareExportDefaultPath } from '../export/default-path';
 import { ensureFileExtension } from '../export/file-path';
 import { PdfExporter } from '../export/pdf-exporter';
 import { JobRegistry } from '../jobs/job-registry';
@@ -90,6 +92,27 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
 
+const EXPORT_CONTEXT_ERROR = '导出参数无效';
+
+/** A context is valid when it names a known scope and, if present, a real paper id. */
+function isValidExportContext(context: unknown): context is ExportContext {
+  if (typeof context !== 'object' || context === null) {
+    return false;
+  }
+  const candidate = context as { scope?: unknown; paperId?: unknown };
+  if (candidate.scope !== 'note' && candidate.scope !== 'all') {
+    return false;
+  }
+  if (candidate.paperId === undefined) {
+    return true;
+  }
+  return (
+    typeof candidate.paperId === 'number' &&
+    Number.isInteger(candidate.paperId) &&
+    candidate.paperId > 0
+  );
+}
+
 /**
  * Reads a PDF into an ArrayBuffer that contains exactly the file bytes (no
  * shared Buffer-pool overrun) plus the base name for the viewer.
@@ -119,6 +142,39 @@ export function registerIpcHandlers(deps: HandlerDeps): {
   });
   const libraryRoot = (): string =>
     getStoredAppSettings(db, deps.documentsDir).libraryRoot;
+  // Without a context the v1.2 behavior is unchanged: the dialog starts at the
+  // suggested name. A note export uses the paper's canonical managed folder;
+  // an unmanaged paper, a missing row or a non-canonical folder still exports
+  // into Documents rather than blocking.
+  const exportDefaultPath = async (
+    suggestedName: string,
+    context: ExportContext | undefined,
+  ): Promise<string> => {
+    if (context === undefined) {
+      return suggestedName;
+    }
+    if (!isValidExportContext(context)) {
+      throw new Error(EXPORT_CONTEXT_ERROR);
+    }
+    let storageDir: string | null = null;
+    if (context.scope === 'note' && context.paperId !== undefined) {
+      const paper = getPaper(db, context.paperId);
+      if (
+        paper !== null &&
+        paper.storageDir !== null &&
+        isCanonicalStorageDir(paper.storageDir, paper.id)
+      ) {
+        storageDir = paper.storageDir;
+      }
+    }
+    return prepareExportDefaultPath({
+      root: libraryRoot(),
+      storageDir,
+      fallbackDir: deps.documentsDir,
+      fileName: suggestedName,
+      scope: context.scope,
+    });
+  };
   const library = new PaperLibrary({
     db,
     jobs,
@@ -330,9 +386,15 @@ export function registerIpcHandlers(deps: HandlerDeps): {
 
   electron.ipcMain.handle(
     'export:save',
-    async (_event, suggestedName: string, content: string) => {
+    async (
+      _event,
+      suggestedName: string,
+      content: string,
+      context?: ExportContext,
+    ) => {
+      const defaultPath = await exportDefaultPath(suggestedName, context);
       const result = await electron.dialog.showSaveDialog({
-        defaultPath: suggestedName,
+        defaultPath,
         filters: [{ name: 'Markdown', extensions: ['md'] }],
       });
       if (result.canceled || !result.filePath) {
@@ -345,12 +407,18 @@ export function registerIpcHandlers(deps: HandlerDeps): {
 
   electron.ipcMain.handle(
     'export:saveDocx',
-    async (_event, suggestedName: string, data: Uint8Array) => {
+    async (
+      _event,
+      suggestedName: string,
+      data: Uint8Array,
+      context?: ExportContext,
+    ) => {
       if (typeof suggestedName !== 'string' || !(data instanceof Uint8Array)) {
         throw new Error('Word 导出数据无效');
       }
+      const defaultPath = await exportDefaultPath(suggestedName, context);
       const result = await electron.dialog.showSaveDialog({
-        defaultPath: suggestedName,
+        defaultPath,
         filters: [{ name: 'Word 文档', extensions: ['docx'] }],
       });
       if (result.canceled || !result.filePath) {
@@ -369,6 +437,7 @@ export function registerIpcHandlers(deps: HandlerDeps): {
       suggestedName: string,
       title: string,
       markdown: string,
+      context?: ExportContext,
     ): Promise<string | null> => {
       if (
         typeof suggestedName !== 'string' ||
@@ -380,8 +449,9 @@ export function registerIpcHandlers(deps: HandlerDeps): {
       if (markdown.length > 20_000_000) {
         throw new Error('导出内容过大');
       }
+      const defaultPath = await exportDefaultPath(suggestedName, context);
       const result = await electron.dialog.showSaveDialog({
-        defaultPath: suggestedName,
+        defaultPath,
         filters: [{ name: 'PDF 文档', extensions: ['pdf'] }],
       });
       if (result.canceled || !result.filePath) {

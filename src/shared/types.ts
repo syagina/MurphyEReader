@@ -105,6 +105,15 @@ export type NoteType = 'concept' | 'summary' | 'manual' | 'idea';
 /** Formats a paper's notes can be exported to. */
 export type ExportFormat = 'md' | 'pdf' | 'docx';
 
+/** Which notes an export covers; drives the default save directory. */
+export type ExportScope = 'note' | 'all';
+
+/** Where an export should start: one paper's notes or the whole library. */
+export interface ExportContext {
+  paperId?: number;
+  scope: ExportScope;
+}
+
 /** Content handed to the hidden renderer window that produces a PDF. */
 export interface PdfExportJob {
   title: string;

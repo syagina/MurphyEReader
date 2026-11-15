@@ -60,6 +60,7 @@ export function NoteEditor({ paper, note, onClose }: NoteEditorProps): React.JSX
         draftTitle,
         buildNoteMarkdown(paper, draftNote),
         exportFormat,
+        { paperId: paper.id, scope: 'note' },
       );
     } catch (exportError) {
       setLocalError(errorMessage(exportError));
