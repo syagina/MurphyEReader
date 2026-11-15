@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { AppSettings, AppSettingsUpdate } from '@shared/types';
-import { errorMessage } from '../lib/errors';
+import { errorMessage, stripIpcErrorPrefix } from '../lib/errors';
 
 export interface AppSettingsState {
   settings: AppSettings | null;
@@ -26,7 +26,7 @@ export const useAppSettingsStore = create<AppSettingsState>()((set) => ({
       const settings = await window.api.appSettings.get();
       set({ settings });
     } catch (error) {
-      set({ error: errorMessage(error) });
+      set({ error: stripIpcErrorPrefix(errorMessage(error)) });
     } finally {
       set({ loading: false });
     }
@@ -38,7 +38,7 @@ export const useAppSettingsStore = create<AppSettingsState>()((set) => ({
       const settings = await window.api.appSettings.update(patch);
       set({ settings });
     } catch (error) {
-      set({ error: errorMessage(error) });
+      set({ error: stripIpcErrorPrefix(errorMessage(error)) });
       throw error;
     }
   },

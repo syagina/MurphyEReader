@@ -5,13 +5,7 @@ import {
   TRANSLATION_NOT_CONFIGURED,
   TRANSLATION_TOO_LONG,
 } from '@shared/translation';
-import { errorMessage } from './errors';
-
-/**
- * Electron wraps every rejected `ipcMain.handle` message, e.g.
- * `Error invoking remote method 'translate:text': Error: 选中文本过长，请分段翻译`.
- */
-const IPC_ERROR_PREFIX = /^Error invoking remote method '[^']+': (?:Error: )?/;
+import { errorMessage, stripIpcErrorPrefix } from './errors';
 
 /** Service messages the card may show verbatim; anything else is generic. */
 const KNOWN_TRANSLATION_ERRORS: ReadonlySet<string> = new Set([
@@ -28,6 +22,6 @@ const KNOWN_TRANSLATION_ERRORS: ReadonlySet<string> = new Set([
  * transport/provider text with the generic failure message.
  */
 export function normalizeTranslationError(error: unknown): string {
-  const message = errorMessage(error).replace(IPC_ERROR_PREFIX, '');
+  const message = stripIpcErrorPrefix(errorMessage(error));
   return KNOWN_TRANSLATION_ERRORS.has(message) ? message : TRANSLATION_FAILED;
 }

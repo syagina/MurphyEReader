@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react';
 import type { TranslationEngineStatus } from '@shared/types';
-import { errorMessage } from '../../lib/errors';
+import { errorMessage, stripIpcErrorPrefix } from '../../lib/errors';
 import { useAppSettingsStore } from '../../stores/app-settings';
 
 /** Install/warmup output shown in this tab; a whole-paper translation has its own card. */
@@ -36,7 +36,7 @@ export function EngineSettingsTab(): React.JSX.Element {
       setStatus(next);
       return next;
     } catch (error) {
-      setActionError(errorMessage(error));
+      setActionError(stripIpcErrorPrefix(errorMessage(error)));
       return null;
     }
   }, []);
@@ -96,7 +96,7 @@ export function EngineSettingsTab(): React.JSX.Element {
       const next = await refreshStatus();
       setActiveJobId(next?.busy === true ? result.jobId : null);
     } catch (error) {
-      setActionError(errorMessage(error));
+      setActionError(stripIpcErrorPrefix(errorMessage(error)));
     } finally {
       setStarting(false);
     }
@@ -115,7 +115,7 @@ export function EngineSettingsTab(): React.JSX.Element {
       await refreshStatus();
     } catch (error) {
       // The store also records this; show it even if the tab is still mounted.
-      setActionError(errorMessage(error));
+      setActionError(stripIpcErrorPrefix(errorMessage(error)));
     }
   };
 
@@ -126,11 +126,14 @@ export function EngineSettingsTab(): React.JSX.Element {
     try {
       await window.api.translation.cancel(activeJobId);
     } catch (error) {
-      setActionError(errorMessage(error));
+      setActionError(stripIpcErrorPrefix(errorMessage(error)));
     }
   };
 
-  const detectedPath = status?.detectedPath ?? settings?.babeldocDetectedPath ?? null;
+  // While status is loaded it is authoritative: a stale settings snapshot must
+  // not keep showing 已检测到 after 重新检测 found nothing.
+  const detectedPath =
+    status !== null ? status.detectedPath : (settings?.babeldocDetectedPath ?? null);
   const configuredPath = status?.configuredPath ?? settings?.babeldocPath ?? '';
   const busy = starting || activeJobId !== null || status?.busy === true;
   const error = actionError ?? storeError;

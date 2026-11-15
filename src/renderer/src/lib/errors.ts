@@ -5,3 +5,17 @@
 export function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
+
+/**
+ * Electron wraps every rejected `ipcMain.handle` message, e.g.
+ * `Error invoking remote method 'translate:text': Error: 选中文本过长，请分段翻译`.
+ */
+const IPC_ERROR_PREFIX = /^Error invoking remote method '[^']+': (?:Error: )?/;
+
+/**
+ * Drops Electron's English IPC wrapper from a user-visible message. Messages
+ * without the anchored prefix (including unknown ones) are returned intact.
+ */
+export function stripIpcErrorPrefix(message: string): string {
+  return message.replace(IPC_ERROR_PREFIX, '');
+}
