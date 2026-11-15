@@ -1,4 +1,7 @@
 import { EventEmitter } from 'node:events';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { JobRegistry } from '@main/jobs/job-registry';
 import type { StoredAppSettings } from '@main/settings/app-settings';
@@ -33,6 +36,8 @@ interface HarnessOptions {
   which?: (command: string) => string[];
   probe?: (path: string) => Promise<boolean>;
   run?: (options: ToolRunOptions) => Promise<ToolRunResult>;
+  /** Leave the real default probe (spawning `--help`) in place. */
+  defaultProbe?: boolean;
 }
 
 function createHarness(options: HarnessOptions = {}) {
@@ -69,7 +74,9 @@ function createHarness(options: HarnessOptions = {}) {
     platform: 'win32',
     exists: options.exists ?? (() => false),
     which: options.which ?? (() => []),
-    probe: options.probe ?? (async () => true),
+    ...(options.defaultProbe === true
+      ? {}
+      : { probe: options.probe ?? (async () => true) }),
   });
   const waitForDone = (): Promise<ToolDoneEvent> =>
     new Promise((resolve) => bus.once('tool:done', resolve));
@@ -313,5 +320,26 @@ describe('BabeldocService.cancel', () => {
 
     expect(harness.service.cancel('job-1')).toBe(true);
     expect(harness.cancel).toHaveBeenCalledWith('job-1');
+  });
+});
+
+/** Review Focus #4: detection's real `--help` probe must also run spaced shims. */
+describe.skipIf(process.platform !== 'win32')('default probe integration', () => {
+  it('默认探针能运行路径含空格的 .cmd 候选', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'paperlens babeldoc probe '));
+    const shim = join(dir, 'babeldoc.cmd');
+    writeFileSync(shim, '@echo off\r\nexit /b 0\r\n');
+    try {
+      const harness = createHarness({
+        babeldocPath: shim,
+        exists: (path) => path === shim,
+        which: () => [],
+        defaultProbe: true,
+      });
+
+      await expect(harness.service.detect()).resolves.toBe(shim);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

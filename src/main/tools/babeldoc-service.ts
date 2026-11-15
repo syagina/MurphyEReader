@@ -1,5 +1,5 @@
 import { spawn, spawnSync } from 'node:child_process';
-import type { ChildProcess } from 'node:child_process';
+import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import type {
@@ -117,10 +117,15 @@ function createDefaultProbe(
       let child: ChildProcess;
       try {
         const invocation = buildCommandInvocation(path, ['--help'], platform);
-        child = spawn(invocation.file, invocation.args, {
+        const spawnOptions: SpawnOptions = {
           windowsHide: true,
           stdio: 'ignore',
-        });
+          // The builder already quoted the batch command; keep those quotes.
+          ...(invocation.file.toLowerCase() === 'cmd.exe'
+            ? { windowsVerbatimArguments: true }
+            : {}),
+        };
+        child = spawn(invocation.file, invocation.args, spawnOptions);
       } catch {
         finish(false);
         return;
