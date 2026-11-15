@@ -45,7 +45,7 @@ app.whenReady().then(() => {
   db = database;
   const secret = createSafeStorageSecretStore();
 
-  registerIpcHandlers({
+  const { startStorageMigration } = registerIpcHandlers({
     db: database,
     secret,
     documentsDir: app.getPath('documents'),
@@ -59,6 +59,10 @@ app.whenReady().then(() => {
   });
 
   createWindow();
+
+  // One background pass adopts legacy papers; failures are recorded by the
+  // handler and shown in the library, so the window opens regardless.
+  void startStorageMigration();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

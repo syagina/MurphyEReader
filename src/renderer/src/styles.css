@@ -591,6 +591,60 @@ input:focus-visible {
   color: var(--danger);
 }
 
+.library-import-error {
+  max-width: 280px;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.library-storage-banner-actions {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+}
+
+.library-page-notice {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin: 0 0 12px;
+  padding: 9px 12px;
+  border: 1px solid #c7d7fb;
+  border-radius: var(--radius);
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.library-page-notice .menu-button {
+  flex: 0 0 auto;
+  color: var(--accent);
+}
+
+.library-migration-summary {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.library-migration-skipped summary {
+  cursor: pointer;
+  color: var(--text-muted);
+}
+
+.library-migration-skipped ul {
+  margin: 6px 0 0;
+  padding-left: 18px;
+  color: var(--text-muted);
+  line-height: 1.6;
+}
+
 .library-controls {
   display: flex;
   flex: 0 0 auto;

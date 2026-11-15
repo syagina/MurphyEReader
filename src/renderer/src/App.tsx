@@ -15,6 +15,7 @@ import { useReaderStore } from './stores/reader';
 import type { ReaderSelection } from './stores/reader';
 import { useSearchStore } from './stores/search';
 import { useSettingsStore } from './stores/settings';
+import { useStorageStore } from './stores/storage';
 
 type AiTab = 'chat' | 'notes';
 
@@ -83,6 +84,13 @@ export default function App(): React.JSX.Element {
   // dialog is ever opened. The store records its own load errors.
   useEffect(() => {
     void useSettingsStore.getState().load();
+  }, []);
+
+  // Subscribe to storage busy/migration events for the library banners and
+  // read the current storage status once. StrictMode may mount twice; the
+  // store keeps a single subscription and the cleanup re-arms it.
+  useEffect(() => {
+    return useStorageStore.getState().init();
   }, []);
 
   // A pending concept card belongs to the paper it was started from, and so

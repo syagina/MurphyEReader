@@ -5,7 +5,13 @@ import { basename, join } from 'node:path';
 import type Database from 'better-sqlite3';
 import * as electron from 'electron';
 import type { BrowserWindow } from 'electron';
-import type { AiSettingsInput, ChatSendRequest, NoteType, Paper } from '@shared/types';
+import type {
+  AiSettingsInput,
+  ChatSendRequest,
+  LegacyMigrationSummary,
+  NoteType,
+  Paper,
+} from '@shared/types';
 import { abortChat, startChat } from '../ai/chat-service';
 import { AiClient } from '../ai/client';
 import { generateNote } from '../ai/note-service';
@@ -25,7 +31,9 @@ import { JobRegistry } from '../jobs/job-registry';
 import { getApiKey, getSettings, setSettings } from '../settings';
 import { getStoredAppSettings } from '../settings/app-settings';
 import type { SecretStore } from '../settings/secret-store';
+import { migrateLegacyPapers } from '../storage/legacy-migration';
 import { PaperLibrary } from '../storage/library-service';
+import { readStorageInfo } from '../storage/storage-info';
 
 export interface HandlerDeps {
   db: Database.Database;
@@ -77,6 +85,10 @@ export function resolvePaperPath(
   return paper.filePathOriginal;
 }
 
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 /**
  * Reads a PDF into an ArrayBuffer that contains exactly the file bytes (no
  * shared Buffer-pool overrun) plus the base name for the viewer.
@@ -95,19 +107,44 @@ export async function toLoadPayload(
   return { data, fileName: basename(filePath) };
 }
 
-export function registerIpcHandlers(deps: HandlerDeps): { jobs: JobRegistry } {
+export function registerIpcHandlers(deps: HandlerDeps): {
+  jobs: JobRegistry;
+  startStorageMigration(): Promise<void>;
+} {
   const { db, secret, emit } = deps;
-  const jobs = new JobRegistry();
+  const jobs = new JobRegistry((state) => {
+    emit('storage:busy', state);
+    emit('translation:state', state);
+  });
+  const libraryRoot = (): string =>
+    getStoredAppSettings(db, deps.documentsDir).libraryRoot;
   const library = new PaperLibrary({
     db,
     jobs,
-    getRoot: () => getStoredAppSettings(db, deps.documentsDir).libraryRoot,
+    getRoot: libraryRoot,
   });
   const pdfExporter = new PdfExporter({
     preloadPath: join(__dirname, '../preload/index.js'),
     rendererFile: join(__dirname, '../renderer/index.html'),
     rendererUrl: process.env['ELECTRON_RENDERER_URL'],
   });
+
+  // Migration status survives worker failures so the storage info page can
+  // report the last pass and its Chinese error instead of losing it.
+  let lastMigration: LegacyMigrationSummary | null = null;
+  let lastStorageError: string | null = null;
+
+  const runStorageMigration = async (): Promise<LegacyMigrationSummary> => {
+    try {
+      const summary = await migrateLegacyPapers(db, jobs, libraryRoot(), emit);
+      lastMigration = summary;
+      lastStorageError = null;
+      return summary;
+    } catch (error) {
+      lastStorageError = errorMessage(error);
+      throw error;
+    }
+  };
 
   const pickPdf = async (): Promise<string | null> => {
     const result = await electron.dialog.showOpenDialog({
@@ -369,5 +406,22 @@ export function registerIpcHandlers(deps: HandlerDeps): { jobs: JobRegistry } {
     return client.testConnection();
   });
 
-  return { jobs };
+  electron.ipcMain.handle('storage:getInfo', () =>
+    readStorageInfo(db, deps.documentsDir, lastMigration, lastStorageError),
+  );
+
+  // A manual retry reports its failure to the caller after recording it; the
+  // startup run below swallows it so the window still opens.
+  electron.ipcMain.handle('storage:migrateLegacy', () => runStorageMigration());
+
+  return {
+    jobs,
+    async startStorageMigration(): Promise<void> {
+      try {
+        await runStorageMigration();
+      } catch {
+        // Recorded in lastStorageError and surfaced through storage:getInfo.
+      }
+    },
+  };
 }

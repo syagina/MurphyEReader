@@ -156,6 +156,28 @@ export interface JobState {
   translatingPaperId: number | null;
 }
 
+/** A legacy paper left unmanaged because migration could not adopt it. */
+export interface LegacyMigrationSkippedPaper {
+  paperId: number;
+  title: string;
+  reason: string;
+}
+
+/** Outcome of one legacy-to-managed migration pass. */
+export interface LegacyMigrationSummary {
+  adopted: number;
+  skipped: LegacyMigrationSkippedPaper[];
+}
+
+/** Library root state shown in the library and settings pages. */
+export interface StorageInfo {
+  root: string;
+  defaultRoot: string;
+  writable: boolean;
+  migration: LegacyMigrationSummary | null;
+  error: string | null;
+}
+
 export interface ToolProgressEvent {
   jobId: string;
   kind: ToolTask;

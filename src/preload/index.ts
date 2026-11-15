@@ -73,6 +73,12 @@ const api: PaperLensApi = {
     set: (input) => ipcRenderer.invoke('settings:set', input),
     test: (input) => ipcRenderer.invoke('settings:test', input),
   },
+  storage: {
+    getInfo: () => ipcRenderer.invoke('storage:getInfo'),
+    migrateLegacy: () => ipcRenderer.invoke('storage:migrateLegacy'),
+    onBusy: (cb) => subscribe('storage:busy', cb),
+    onMigrated: (cb) => subscribe('storage:migrated', cb),
+  },
 };
 
 contextBridge.exposeInMainWorld('api', api);

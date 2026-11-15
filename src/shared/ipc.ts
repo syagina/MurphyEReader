@@ -5,11 +5,14 @@ import type {
   ChatSendRequest,
   Conversation,
   ImportPaperResult,
+  JobState,
+  LegacyMigrationSummary,
   Note,
   NoteType,
   Paper,
   PdfExportJob,
   SearchResult,
+  StorageInfo,
 } from './types';
 
 export interface PaperLensApi {
@@ -96,5 +99,11 @@ export interface PaperLensApi {
     get(): Promise<AiSettings>;
     set(input: AiSettingsInput): Promise<AiSettings>;
     test(input: AiSettingsInput): Promise<{ ok: boolean; error?: string }>;
+  };
+  storage: {
+    getInfo(): Promise<StorageInfo>;
+    migrateLegacy(): Promise<LegacyMigrationSummary>;
+    onBusy(cb: (state: JobState) => void): () => void;
+    onMigrated(cb: (summary: LegacyMigrationSummary) => void): () => void;
   };
 }

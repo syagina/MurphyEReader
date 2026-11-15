@@ -12,11 +12,14 @@ import {
 import type { LibraryFilter, LibrarySort } from '../lib/library-view';
 import { useLibraryStore } from '../stores/library';
 import { useNotesStore } from '../stores/notes';
+import { useStorageStore } from '../stores/storage';
 
 interface LibraryViewProps {
   onOpen(paper: Paper): void;
   onContinueReading?(): void;
   activePaperId: number | null;
+  /** Wired by the settings work; hidden while no handler is supplied. */
+  onOpenSettings?(): void;
 }
 
 type LayoutMode = 'grid' | 'list';
@@ -49,6 +52,7 @@ export function LibraryView({
   onOpen,
   onContinueReading,
   activePaperId,
+  onOpenSettings,
 }: LibraryViewProps): React.JSX.Element {
   const papers = useLibraryStore((state) => state.papers);
   const loading = useLibraryStore((state) => state.loading);
@@ -61,6 +65,14 @@ export function LibraryView({
   const updateMeta = useLibraryStore((state) => state.updateMeta);
   const generateNote = useNotesStore((state) => state.generate);
   const notesGenerating = useNotesStore((state) => state.generating);
+  const storageInfo = useStorageStore((state) => state.info);
+  const storageError = useStorageStore((state) => state.error);
+  const lastMigration = useStorageStore((state) => state.lastMigration);
+  const storageTask = useStorageStore((state) => state.busy.storageTask);
+  const dismissStorageError = useStorageStore((state) => state.dismissError);
+  const dismissMigrationNotice = useStorageStore((state) => state.dismissMigrationNotice);
+  const storageBannerError = storageInfo?.error ?? storageError;
+  const storageBusy = storageTask !== null;
 
   const [queryText, setQueryText] = useState('');
   const [activeTag, setActiveTag] = useState<string | null>(null);
@@ -71,6 +83,7 @@ export function LibraryView({
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [draft, setDraft] = useState<EditDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
@@ -93,6 +106,7 @@ export function LibraryView({
 
   const runAction = async (action: () => Promise<void>): Promise<void> => {
     setError(null);
+    setImportError(null);
     try {
       await action();
     } catch (actionError) {
@@ -104,6 +118,7 @@ export function LibraryView({
     setNotice(null);
     void (async () => {
       setError(null);
+      setImportError(null);
       try {
         const result = await importPaper();
         if (result === null) {
@@ -113,8 +128,12 @@ export function LibraryView({
           setSelectedId(result.paper.id);
           setNotice('已在文献库中，已为你选中');
         }
-      } catch (importError) {
-        setError(errorMessage(importError));
+      } catch (failure) {
+        // Review Focus #1: the Chinese failure is visible both in the page
+        // banner and next to the button the user just pressed.
+        const message = errorMessage(failure);
+        setImportError(message);
+        setError(message);
       }
     })();
   };
@@ -141,6 +160,7 @@ export function LibraryView({
   const handleAttach = (paper: Paper): void => {
     setOpenMenuId(null);
     setNotice(null);
+    setImportError(null);
     void (async () => {
       setError(null);
       try {
@@ -170,6 +190,7 @@ export function LibraryView({
   const startEdit = (paper: Paper): void => {
     setOpenMenuId(null);
     setError(null);
+    setImportError(null);
     setDraft({
       id: paper.id,
       title: paper.title,
@@ -183,6 +204,7 @@ export function LibraryView({
     if (draft === null) {
       return;
     }
+    setImportError(null);
     const title = draft.title.trim();
     if (title === '') {
       setError('标题不能为空');
@@ -229,6 +251,11 @@ export function LibraryView({
           </p>
         </div>
         <div className="library-page-actions">
+          {importError !== null && (
+            <span className="library-import-error" role="alert">
+              {importError}
+            </span>
+          )}
           {onContinueReading !== undefined && (
             <button type="button" className="secondary-button" onClick={onContinueReading}>
               继续阅读
@@ -238,13 +265,56 @@ export function LibraryView({
             type="button"
             className="primary-button library-import-button"
             onClick={handleImport}
-            disabled={loading}
+            disabled={loading || storageBusy}
             aria-label="导入 PDF"
           >
             {loading && papers.length === 0 ? '正在加载…' : '＋ 导入 PDF'}
           </button>
         </div>
       </header>
+
+      {storageBannerError !== null && (
+        <div className="library-error library-page-error library-storage-banner" role="alert">
+          <span>{storageBannerError}</span>
+          <div className="library-storage-banner-actions">
+            {onOpenSettings !== undefined && (
+              <button type="button" className="menu-button" onClick={onOpenSettings}>
+                打开设置
+              </button>
+            )}
+            <button type="button" className="menu-button" onClick={dismissStorageError}>
+              关闭
+            </button>
+          </div>
+        </div>
+      )}
+
+      {lastMigration !== null && lastMigration.adopted > 0 && (
+        <div className="library-page-notice library-migration-notice" role="status">
+          <div className="library-migration-summary">
+            <span>已整理 {lastMigration.adopted} 篇文献</span>
+            {lastMigration.skipped.length > 0 && (
+              <details className="library-migration-skipped">
+                <summary>查看跳过项</summary>
+                <ul>
+                  {lastMigration.skipped.map((item) => (
+                    <li key={item.paperId}>
+                      {item.title}：{item.reason}
+                    </li>
+                  ))}
+                </ul>
+              </details>
+            )}
+          </div>
+          <button
+            type="button"
+            className="menu-button"
+            onClick={dismissMigrationNotice}
+          >
+            关闭
+          </button>
+        </div>
+      )}
 
       {notice !== null && (
         <div className="library-page-error" role="status">
@@ -258,7 +328,14 @@ export function LibraryView({
       {error !== null && (
         <div className="library-error library-page-error" role="alert">
           <span>{error}</span>
-          <button type="button" className="menu-button" onClick={() => setError(null)}>
+          <button
+            type="button"
+            className="menu-button"
+            onClick={() => {
+              setError(null);
+              setImportError(null);
+            }}
+          >
             关闭
           </button>
         </div>
@@ -369,6 +446,7 @@ export function LibraryView({
                     type="button"
                     className="primary-button library-empty-import"
                     onClick={handleImport}
+                    disabled={storageBusy}
                   >
                     导入 PDF
                   </button>
@@ -506,6 +584,7 @@ export function LibraryView({
                         <button
                           type="button"
                           className="menu-button"
+                          disabled={storageBusy}
                           onClick={() => handleAttach(paper)}
                         >
                           绑定译本
@@ -513,6 +592,7 @@ export function LibraryView({
                         <button
                           type="button"
                           className="menu-button"
+                          disabled={storageBusy}
                           onClick={() => handleRelocate(paper, 'original')}
                         >
                           重新定位原文
@@ -521,6 +601,7 @@ export function LibraryView({
                           <button
                             type="button"
                             className="menu-button"
+                            disabled={storageBusy}
                             onClick={() => handleRelocate(paper, 'translated')}
                           >
                             重新定位译本
@@ -536,6 +617,7 @@ export function LibraryView({
                         <button
                           type="button"
                           className="menu-button danger"
+                          disabled={storageBusy}
                           onClick={() => handleDelete(paper)}
                         >
                           删除
