@@ -6,7 +6,9 @@ import type {
   ChatMessage,
   ChatSendRequest,
   Conversation,
+  FolderImportSummary,
   ImportPaperResult,
+  ImportProgressEvent,
   JobState,
   LegacyMigrationSummary,
   Note,
@@ -112,9 +114,13 @@ export interface PaperLensApi {
     migrateLegacy(): Promise<LegacyMigrationSummary>;
     chooseRoot(): Promise<string | null>;
     changeRoot(newRoot: string): Promise<RootChangeResult>;
+    /** Asks for a folder and imports every PDF below it; null when canceled. */
+    importFolder(): Promise<FolderImportSummary | null>;
+    cancelImport(): Promise<void>;
     openRoot(): Promise<void>;
     revealPaper(paperId: number): Promise<void>;
     onBusy(cb: (state: JobState) => void): () => void;
     onMigrated(cb: (summary: LegacyMigrationSummary) => void): () => void;
+    onImportProgress(cb: (event: ImportProgressEvent) => void): () => void;
   };
 }

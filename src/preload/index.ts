@@ -82,10 +82,13 @@ const api: PaperLensApi = {
     migrateLegacy: () => ipcRenderer.invoke('storage:migrateLegacy'),
     chooseRoot: () => ipcRenderer.invoke('storage:chooseRoot'),
     changeRoot: (newRoot) => ipcRenderer.invoke('storage:changeRoot', newRoot),
+    importFolder: () => ipcRenderer.invoke('storage:importFolder'),
+    cancelImport: () => ipcRenderer.invoke('storage:cancelImport'),
     openRoot: () => ipcRenderer.invoke('storage:openRoot'),
     revealPaper: (paperId) => ipcRenderer.invoke('storage:revealPaper', paperId),
     onBusy: (cb) => subscribe('storage:busy', cb),
     onMigrated: (cb) => subscribe('storage:migrated', cb),
+    onImportProgress: (cb) => subscribe('storage:importProgress', cb),
   },
 };
 

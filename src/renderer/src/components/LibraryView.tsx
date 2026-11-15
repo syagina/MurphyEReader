@@ -36,6 +36,12 @@ function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : '操作失败';
 }
 
+/** Displays the final path segment without pulling Node's `path` into the renderer. */
+function fileNameOf(filePath: string): string {
+  const parts = filePath.split(/[\\/]/);
+  return parts[parts.length - 1] || filePath;
+}
+
 function openTargetIsInteractive(target: EventTarget | null): boolean {
   return (
     target instanceof Element &&
@@ -70,6 +76,11 @@ export function LibraryView({
   const lastMigration = useStorageStore((state) => state.lastMigration);
   const storageTask = useStorageStore((state) => state.busy.storageTask);
   const revealPaper = useStorageStore((state) => state.revealPaper);
+  const importFolder = useStorageStore((state) => state.importFolder);
+  const cancelImport = useStorageStore((state) => state.cancelImport);
+  const importProgress = useStorageStore((state) => state.importProgress);
+  const lastFolderSummary = useStorageStore((state) => state.lastFolderSummary);
+  const dismissFolderSummary = useStorageStore((state) => state.dismissFolderSummary);
   const dismissStorageError = useStorageStore((state) => state.dismissError);
   const dismissMigrationNotice = useStorageStore((state) => state.dismissMigrationNotice);
   // A renderer action failure is newer than the last main-process snapshot.
@@ -138,6 +149,15 @@ export function LibraryView({
         setError(message);
       }
     })();
+  };
+
+  const handleImportFolder = (): void => {
+    setNotice(null);
+    setError(null);
+    setImportError(null);
+    // The storage store owns the batch summary and error banner; this click
+    // starts the dialog and returns immediately.
+    void importFolder();
   };
 
   const handleOpen = (paper: Paper): void => {
@@ -270,6 +290,14 @@ export function LibraryView({
           )}
           <button
             type="button"
+            className="secondary-button library-import-folder-button"
+            onClick={handleImportFolder}
+            disabled={loading || storageBusy}
+          >
+            ＋ 从文件夹导入
+          </button>
+          <button
+            type="button"
             className="primary-button library-import-button"
             onClick={handleImport}
             disabled={loading || storageBusy}
@@ -279,6 +307,21 @@ export function LibraryView({
           </button>
         </div>
       </header>
+
+      {importProgress !== null && (
+        <div className="library-page-notice library-import-progress" role="status">
+          <span>
+            {importProgress.phase === 'scan'
+              ? `正在扫描文件夹…（共 ${importProgress.total} 个 PDF）`
+              : `正在导入 ${importProgress.current}/${importProgress.total}：${fileNameOf(
+                  importProgress.file,
+                )}`}
+          </span>
+          <button type="button" className="menu-button" onClick={() => void cancelImport()}>
+            取消
+          </button>
+        </div>
+      )}
 
       {storageBannerError !== null && (
         <div className="library-error library-page-error library-storage-banner" role="alert">
@@ -707,6 +750,59 @@ export function LibraryView({
               </button>
             </div>
           </form>
+        </div>
+      )}
+      {lastFolderSummary !== null && (
+        <div
+          className="library-modal-backdrop"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget) {
+              dismissFolderSummary();
+            }
+          }}
+        >
+          <div
+            className="library-edit-dialog library-folder-summary"
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="library-folder-summary-title"
+          >
+            <h2 className="library-edit-title" id="library-folder-summary-title">
+              文件夹导入完成
+            </h2>
+            <p className="library-folder-summary-counts">
+              成功 {lastFolderSummary.imported} 篇 · 跳过 {lastFolderSummary.skipped} 篇 · 失败{' '}
+              {lastFolderSummary.failed.length} 个
+            </p>
+            {lastFolderSummary.canceled && (
+              <p className="library-folder-summary-note">导入已取消，已导入的文献仍然保留。</p>
+            )}
+            {lastFolderSummary.failed.length > 0 && (
+              <>
+                <p className="library-folder-summary-heading">失败详情（最多显示前 5 个）</p>
+                <ul className="library-folder-summary-failures">
+                  {lastFolderSummary.failed.slice(0, 5).map((failure, index) => (
+                    <li key={`${failure.file}-${index}`}>
+                      <span className="library-folder-summary-file">
+                        {fileNameOf(failure.file)}
+                      </span>
+                      <span className="library-folder-summary-reason">{failure.message}</span>
+                    </li>
+                  ))}
+                </ul>
+                {lastFolderSummary.failed.length > 5 && (
+                  <p className="library-folder-summary-note">
+                    另有 {lastFolderSummary.failed.length - 5} 个失败未显示。
+                  </p>
+                )}
+              </>
+            )}
+            <div className="library-edit-actions">
+              <button type="button" className="primary-button" onClick={dismissFolderSummary}>
+                关闭
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </section>

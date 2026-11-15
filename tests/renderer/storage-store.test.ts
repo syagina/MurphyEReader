@@ -2,6 +2,8 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   AppSettings,
+  FolderImportSummary,
+  ImportProgressEvent,
   JobState,
   LegacyMigrationSummary,
   Paper,
@@ -61,8 +63,13 @@ function installApi() {
     ),
     openRoot: vi.fn(async (): Promise<void> => undefined),
     revealPaper: vi.fn(async (_paperId: number): Promise<void> => undefined),
+    importFolder: vi.fn(async (): Promise<FolderImportSummary | null> => null),
+    cancelImport: vi.fn(async (): Promise<void> => undefined),
     onBusy: vi.fn((_cb: (state: JobState) => void) => () => undefined),
     onMigrated: vi.fn((_cb: (summary: LegacyMigrationSummary) => void) => () => undefined),
+    onImportProgress: vi.fn(
+      (_cb: (event: ImportProgressEvent) => void) => () => undefined,
+    ),
   };
   const appSettings = {
     get: vi.fn(async (): Promise<AppSettings> => makeAppSettings()),
@@ -85,6 +92,8 @@ function resetStores(): void {
     lastMigration: null,
     migrationDismissed: false,
     rootChangeNotice: null,
+    importProgress: null,
+    lastFolderSummary: null,
   });
   useAppSettingsStore.setState({ settings: null, loading: false, error: null });
 }
@@ -263,6 +272,102 @@ describe('useStorageStore.loadInfo', () => {
 
     expect(useStorageStore.getState().error).toBe('新位置不可写，请选择其他文件夹');
     expect(useStorageStore.getState().errorDismissed).toBe(false);
+  });
+});
+
+describe('useStorageStore import folder', () => {
+  const summary: FolderImportSummary = {
+    imported: 2,
+    skipped: 1,
+    failed: [{ file: 'C:/inbox/bad.pdf', message: '无法读取 PDF：损坏' }],
+    canceled: false,
+  };
+
+  it('完成后保存摘要、清空进度并刷新文献库', async () => {
+    api.storage.importFolder.mockResolvedValue(summary);
+
+    const result = await useStorageStore.getState().importFolder();
+
+    expect(result).toEqual(summary);
+    const state = useStorageStore.getState();
+    expect(state.lastFolderSummary).toEqual(summary);
+    expect(state.importProgress).toBeNull();
+    expect(state.error).toBeNull();
+    expect(api.papers.list).toHaveBeenCalledTimes(1);
+    expect(api.papers.checkFiles).toHaveBeenCalledTimes(1);
+  });
+
+  it('取消目录选择时返回 null 且不刷新文献库', async () => {
+    api.storage.importFolder.mockResolvedValue(null);
+
+    const result = await useStorageStore.getState().importFolder();
+
+    expect(result).toBeNull();
+    expect(useStorageStore.getState().lastFolderSummary).toBeNull();
+    expect(api.papers.list).not.toHaveBeenCalled();
+  });
+
+  it('导入失败时记录中文错误、清空进度且不显示摘要', async () => {
+    api.storage.importFolder.mockRejectedValue(new Error('无法读取文件夹：拒绝访问'));
+
+    const result = await useStorageStore.getState().importFolder();
+
+    expect(result).toBeNull();
+    const state = useStorageStore.getState();
+    expect(state.error).toBe('无法读取文件夹：拒绝访问');
+    expect(state.errorDismissed).toBe(false);
+    expect(state.lastFolderSummary).toBeNull();
+    expect(state.importProgress).toBeNull();
+    expect(api.papers.list).not.toHaveBeenCalled();
+  });
+
+  it('取消导入直接调用接口，失败时记录错误', async () => {
+    await useStorageStore.getState().cancelImport();
+    expect(api.storage.cancelImport).toHaveBeenCalledTimes(1);
+
+    api.storage.cancelImport.mockRejectedValue(new Error('取消失败'));
+    await useStorageStore.getState().cancelImport();
+    expect(useStorageStore.getState().error).toBe('取消失败');
+  });
+
+  it('关闭摘要后不再显示', () => {
+    useStorageStore.setState({ lastFolderSummary: summary });
+
+    useStorageStore.getState().dismissFolderSummary();
+
+    expect(useStorageStore.getState().lastFolderSummary).toBeNull();
+  });
+});
+
+describe('useStorageStore.init 导入进度', () => {
+  it('订阅导入进度，done 时清空横幅', async () => {
+    const listeners: { progress?: (event: ImportProgressEvent) => void } = {};
+    api.storage.onImportProgress.mockImplementation((cb) => {
+      listeners.progress = cb;
+      return () => undefined;
+    });
+
+    cleanup = useStorageStore.getState().init();
+    await vi.waitFor(() => {
+      expect(api.storage.getInfo).toHaveBeenCalled();
+    });
+    expect(listeners.progress).toBeDefined();
+
+    listeners.progress!({
+      jobId: 'job-1',
+      phase: 'copy',
+      current: 2,
+      total: 5,
+      file: 'C:/inbox/b.pdf',
+    });
+    expect(useStorageStore.getState().importProgress).toMatchObject({
+      phase: 'copy',
+      current: 2,
+      total: 5,
+    });
+
+    listeners.progress!({ jobId: 'job-1', phase: 'done', current: 5, total: 5, file: '' });
+    expect(useStorageStore.getState().importProgress).toBeNull();
   });
 });
 

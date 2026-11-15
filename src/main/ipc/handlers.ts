@@ -126,6 +126,7 @@ export function registerIpcHandlers(deps: HandlerDeps): {
     db,
     jobs,
     getRoot: libraryRoot,
+    emit,
   });
   // Task 12 replaces the detected engine path with a real probe; until then
   // the field is present but empty.
@@ -441,6 +442,20 @@ export function registerIpcHandlers(deps: HandlerDeps): {
     lastMigration = null;
     lastStorageError = null;
     return result;
+  });
+
+  electron.ipcMain.handle('storage:importFolder', async () => {
+    const result = await electron.dialog.showOpenDialog({
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return library.importFolder(result.filePaths[0]);
+  });
+
+  electron.ipcMain.handle('storage:cancelImport', () => {
+    library.cancelImport();
   });
 
   electron.ipcMain.handle('storage:openRoot', async () => {

@@ -1,5 +1,7 @@
 import { create } from 'zustand';
 import type {
+  FolderImportSummary,
+  ImportProgressEvent,
   JobState,
   LegacyMigrationSummary,
   RootChangeResult,
@@ -30,15 +32,22 @@ export interface StorageState {
   migrationDismissed: boolean;
   /** Result notice for the last successful root change. */
   rootChangeNotice: string | null;
+  /** Latest throttled progress snapshot while a folder batch is running. */
+  importProgress: ImportProgressEvent | null;
+  /** Outcome of the last completed folder batch; shown in a summary modal. */
+  lastFolderSummary: FolderImportSummary | null;
   init(): () => void;
   loadInfo(): Promise<void>;
   migrateLegacy(): Promise<LegacyMigrationSummary | null>;
   chooseAndChangeRoot(): Promise<void>;
+  importFolder(): Promise<FolderImportSummary | null>;
+  cancelImport(): Promise<void>;
   openRoot(): Promise<void>;
   revealPaper(paperId: number): Promise<void>;
   dismissError(): void;
   dismissMigrationNotice(): void;
   dismissRootChangeNotice(): void;
+  dismissFolderSummary(): void;
 }
 
 function rootChangeSummary(result: RootChangeResult): string {
@@ -63,6 +72,8 @@ export const useStorageStore = create<StorageState>()((set, get) => ({
   lastMigration: null,
   migrationDismissed: false,
   rootChangeNotice: null,
+  importProgress: null,
+  lastFolderSummary: null,
 
   init() {
     let unsubscribe = unsubscribeEvents;
@@ -83,9 +94,15 @@ export const useStorageStore = create<StorageState>()((set, get) => ({
             });
         }
       });
+      const offImportProgress = window.api.storage.onImportProgress((event) => {
+        // `done` arrives right before the invoke resolves with the summary;
+        // clearing here removes the progress banner as soon as work stops.
+        set({ importProgress: event.phase === 'done' ? null : event });
+      });
       unsubscribe = () => {
         offBusy();
         offMigrated();
+        offImportProgress();
         unsubscribeEvents = null;
       };
       unsubscribeEvents = unsubscribe;
@@ -187,6 +204,40 @@ export const useStorageStore = create<StorageState>()((set, get) => ({
     }
   },
 
+  async importFolder() {
+    // A new attempt makes the previous summary modal stale immediately.
+    set({
+      lastFolderSummary: null,
+      importProgress: null,
+      error: null,
+      errorDismissed: false,
+    });
+    try {
+      const summary = await window.api.storage.importFolder();
+      if (summary === null) {
+        return null;
+      }
+      set({ lastFolderSummary: summary, importProgress: null });
+      try {
+        await useLibraryStore.getState().load();
+      } catch (error) {
+        set({ error: errorMessage(error), errorDismissed: false });
+      }
+      return summary;
+    } catch (error) {
+      set({ error: errorMessage(error), errorDismissed: false, importProgress: null });
+      return null;
+    }
+  },
+
+  async cancelImport() {
+    try {
+      await window.api.storage.cancelImport();
+    } catch (error) {
+      set({ error: errorMessage(error), errorDismissed: false });
+    }
+  },
+
   async openRoot() {
     await window.api.storage.openRoot();
   },
@@ -209,5 +260,9 @@ export const useStorageStore = create<StorageState>()((set, get) => ({
 
   dismissRootChangeNotice() {
     set({ rootChangeNotice: null });
+  },
+
+  dismissFolderSummary() {
+    set({ lastFolderSummary: null });
   },
 }));

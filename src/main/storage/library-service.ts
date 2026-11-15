@@ -1,8 +1,14 @@
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { copyFile, mkdir, rm } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import type Database from 'better-sqlite3';
-import type { ImportPaperResult, Paper } from '@shared/types';
+import type {
+  FolderImportSummary,
+  ImportPaperResult,
+  ImportProgressEvent,
+  Paper,
+} from '@shared/types';
 import { replacePages } from '../db/pages';
 import {
   createPaper,
@@ -12,9 +18,11 @@ import {
   updatePaper,
 } from '../db/papers';
 import type { JobRegistry } from '../jobs/job-registry';
+import { createThrottledEmitter } from '../jobs/throttle';
 import { extractPdf, getPdfPageCount } from '../pdf/extract';
 import type { ExtractedPdf } from '../pdf/extract';
 import { adoptUnmanagedPaper } from './adopt';
+import { collectPdfFiles, runFolderImport } from './folder-import';
 import { sha256File } from './hash';
 import {
   CUSTOM_TRANSLATED_NAME,
@@ -31,6 +39,8 @@ export interface PaperLibraryDeps {
   db: Database.Database;
   jobs: JobRegistry;
   getRoot(): string;
+  /** Emits main-process events such as `storage:importProgress`. */
+  emit?(channel: string, payload: unknown): void;
   trashItem?(target: string): Promise<void>;
   copyFile?(source: string, target: string): Promise<void>;
   sha256?(path: string): Promise<string>;
@@ -39,6 +49,7 @@ export interface PaperLibraryDeps {
 const INVALID_MANAGED_PATH_MESSAGE = '文献文件夹路径异常，请重新定位或导入';
 const INVALID_DELETE_PATH_MESSAGE = '文献文件夹路径异常，已中止删除';
 const DUPLICATE_HASH_MESSAGE = '与已有文献重复';
+const FOLDER_IMPORT_PROGRESS_INTERVAL_MS = 200;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -74,6 +85,9 @@ export class PaperLibrary {
   private readonly copy: (source: string, target: string) => Promise<void>;
   private readonly hash: (path: string) => Promise<string>;
   private readonly trash: (target: string) => Promise<void>;
+  private readonly emitEvent: (channel: string, payload: unknown) => void;
+  /** The folder batch currently holding the storage lease, if any. */
+  private activeImport: { jobId: string; canceled: boolean } | null = null;
 
   constructor(deps: PaperLibraryDeps) {
     this.db = deps.db;
@@ -82,6 +96,7 @@ export class PaperLibrary {
     this.copy = deps.copyFile ?? copyFile;
     this.hash = deps.sha256 ?? sha256File;
     this.trash = deps.trashItem ?? trashWithShell;
+    this.emitEvent = deps.emit ?? (() => undefined);
   }
 
   async importPaper(sourcePath: string): Promise<ImportPaperResult> {
@@ -90,6 +105,58 @@ export class PaperLibrary {
       return await this.importPaperLocked(sourcePath);
     } finally {
       this.jobs.releaseStorage();
+    }
+  }
+
+  /**
+   * Imports every PDF below `folderPath` under one storage lease. Cancellation
+   * is cooperative: the file currently being imported finishes, later files
+   * are not started, and results already imported are kept. Progress events
+   * are throttled to one snapshot per 200 ms and always end with `done`.
+   */
+  async importFolder(folderPath: string): Promise<FolderImportSummary> {
+    this.jobs.tryAcquireStorage('importFolder');
+    const jobId = randomUUID();
+    const active = { jobId, canceled: false };
+    this.activeImport = active;
+    const progress = createThrottledEmitter<ImportProgressEvent>(
+      (event) => this.emitEvent('storage:importProgress', event),
+      FOLDER_IMPORT_PROGRESS_INTERVAL_MS,
+    );
+
+    try {
+      const files = await collectPdfFiles(folderPath, this.getRoot());
+      return await runFolderImport(
+        files,
+        (file) => this.importPaperLocked(file),
+        {
+          isCanceled: () => active.canceled,
+          onProgress: (event) => {
+            const payload: ImportProgressEvent = { jobId, ...event };
+            if (event.phase === 'done') {
+              // `done` must be delivered even when the throttle window has
+              // not elapsed, so flush the latest copy snapshot first.
+              progress.flush();
+              this.emitEvent('storage:importProgress', payload);
+              return;
+            }
+            progress.push(payload);
+          },
+        },
+      );
+    } finally {
+      progress.flush();
+      if (this.activeImport === active) {
+        this.activeImport = null;
+      }
+      this.jobs.releaseStorage();
+    }
+  }
+
+  /** Requests cancellation of the active folder batch, if any. */
+  cancelImport(): void {
+    if (this.activeImport !== null) {
+      this.activeImport.canceled = true;
     }
   }
 

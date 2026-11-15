@@ -40,6 +40,29 @@ export interface ImportPaperResult {
   duplicate: boolean;
 }
 
+/** One file that could not be imported during a folder batch. */
+export interface FolderImportFailure {
+  file: string;
+  message: string;
+}
+
+/** Outcome of one recursive folder import. */
+export interface FolderImportSummary {
+  imported: number;
+  skipped: number;
+  failed: FolderImportFailure[];
+  canceled: boolean;
+}
+
+/** Progress notifications for a recursive folder import. */
+export interface ImportProgressEvent {
+  jobId: string;
+  phase: 'scan' | 'copy' | 'done';
+  current: number;
+  total: number;
+  file: string;
+}
+
 export interface Conversation {
   id: number;
   paperId: number;
