@@ -156,6 +156,41 @@ function toNoteResult(row: NoteMatchRow, query: string): SearchResult {
   };
 }
 
+/**
+ * Merges the per-kind result lists without letting one kind consume the whole
+ * limit. Every non-empty kind is guaranteed one slot first (pages → messages
+ * → notes when the limit is smaller than the kind count), then the remaining
+ * slots are distributed round-robin over kinds that still have matches. Rank
+ * order inside each kind is preserved; empty kinds are ignored.
+ */
+function mergeKindResults(groups: SearchResult[][], limit: number): SearchResult[] {
+  const nonEmpty = groups.filter((group) => group.length > 0);
+  if (nonEmpty.length === 0 || limit <= 0) {
+    return [];
+  }
+
+  const quotas = nonEmpty.map(() => 0);
+  let used = 0;
+  for (let index = 0; index < nonEmpty.length && used < limit; index += 1) {
+    quotas[index] = 1;
+    used += 1;
+  }
+
+  let distributed = true;
+  while (used < limit && distributed) {
+    distributed = false;
+    for (let index = 0; index < nonEmpty.length && used < limit; index += 1) {
+      if (quotas[index] < nonEmpty[index].length) {
+        quotas[index] += 1;
+        used += 1;
+        distributed = true;
+      }
+    }
+  }
+
+  return nonEmpty.flatMap((group, index) => group.slice(0, quotas[index]));
+}
+
 function searchWithFts(
   db: Database.Database,
   query: string,
@@ -173,7 +208,7 @@ function searchWithFts(
     db.prepare(NOTE_FTS_SQL).all(phrase, limit) as NoteMatchRow[]
   ).map((row) => toNoteResult(row, query));
 
-  return [...pages, ...messages, ...notes];
+  return mergeKindResults([pages, messages, notes], limit);
 }
 
 function searchWithLike(
@@ -193,7 +228,7 @@ function searchWithLike(
     db.prepare(NOTE_LIKE_SQL).all(pattern, limit) as NoteMatchRow[]
   ).map((row) => toNoteResult(row, query));
 
-  return [...pages, ...messages, ...notes];
+  return mergeKindResults([pages, messages, notes], limit);
 }
 
 export function searchGlobal(

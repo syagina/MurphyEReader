@@ -138,6 +138,53 @@ describe('searchGlobal', () => {
     expect(searchGlobal(db, 'theory')).toEqual([]);
   });
 
+  it('页面命中占满时仍为消息与笔记保留槽位（FTS）', () => {
+    const term = 'commonterm';
+    replacePages(
+      db,
+      paper.id,
+      Array.from({ length: 30 }, (_, index) => ({
+        pageNo: index + 1,
+        text: `${term} 出现在第 ${index + 1} 页`,
+      })),
+    );
+    appendMessage(db, {
+      conversationId,
+      role: 'user',
+      content: `${term} 出现在消息中`,
+    });
+    updateNote(db, noteId, { contentMd: `${term} 出现在笔记中` });
+
+    const results = searchGlobal(db, term);
+
+    expect(results.length).toBeLessThanOrEqual(20);
+    expect(results.filter((result) => result.kind === 'page')).toHaveLength(18);
+    expect(results.filter((result) => result.kind === 'message')).toHaveLength(1);
+    expect(results.filter((result) => result.kind === 'note')).toHaveLength(1);
+    expect(searchGlobal(db, term)).toEqual(results);
+  });
+
+  it('页面命中占满时仍为消息与笔记保留槽位（LIKE 兜底）', () => {
+    const term = '模型';
+    replacePages(
+      db,
+      paper.id,
+      Array.from({ length: 30 }, (_, index) => ({
+        pageNo: index + 1,
+        text: `模型 出现在第 ${index + 1} 页`,
+      })),
+    );
+    updateNote(db, noteId, { contentMd: '模型 出现在笔记中' });
+
+    const results = searchGlobal(db, term);
+
+    expect(results.length).toBeLessThanOrEqual(20);
+    expect(results.filter((result) => result.kind === 'page')).toHaveLength(18);
+    expect(results.filter((result) => result.kind === 'message')).toHaveLength(1);
+    expect(results.filter((result) => result.kind === 'note')).toHaveLength(1);
+    expect(searchGlobal(db, term)).toEqual(results);
+  });
+
   it('LIKE 兜底将通配符按字面量处理', () => {
     replacePages(db, paper.id, [
       { pageNo: 1, text: '百分之百 % 匹配 _ 下划线' },

@@ -363,6 +363,49 @@ describe('useChatStore.send', () => {
     });
   });
 
+  it('自动建会话期间切换文献时不写入乐观消息也不发送', async () => {
+    useChatStore.setState({
+      paperId: 1,
+      conversations: [],
+      activeConversationId: null,
+      messages: [],
+    });
+    const pending = deferred<Conversation>();
+    api.conversations.create.mockImplementation(() => pending.promise);
+
+    const sending = useChatStore.getState().send({
+      paperId: 1,
+      question: '旧文献的问题',
+    });
+
+    const paperTwoConversations = [makeConversation(7, { paperId: 2 })];
+    const paperTwoMessages = [makeMessage(70, 7)];
+    const paperTwoFailed = {
+      paperId: 2,
+      conversationId: 7,
+      question: '新文献的问题',
+      fullTextMode: false,
+    };
+    useChatStore.setState({
+      paperId: 2,
+      conversations: paperTwoConversations,
+      activeConversationId: 7,
+      messages: paperTwoMessages,
+      lastFailedSendArgs: paperTwoFailed,
+    });
+
+    pending.resolve(makeConversation(10, { paperId: 1 }));
+    await sending;
+
+    const state = useChatStore.getState();
+    expect(api.chat.send).not.toHaveBeenCalled();
+    expect(state.paperId).toBe(2);
+    expect(state.conversations).toEqual(paperTwoConversations);
+    expect(state.activeConversationId).toBe(7);
+    expect(state.messages).toEqual(paperTwoMessages);
+    expect(state.lastFailedSendArgs).toEqual(paperTwoFailed);
+  });
+
   it('复用当前会话发送，且只带可选字段', async () => {
     useChatStore.setState({
       paperId: 1,
@@ -685,6 +728,46 @@ describe('useChatStore 会话管理', () => {
     expect(state.conversations.map((conversation) => conversation.id)).toEqual([1, 10]);
     expect(state.activeConversationId).toBe(10);
     expect(state.messages).toEqual([]);
+  });
+
+  it('创建会话期间切换文献时不安装旧文献的会话', async () => {
+    useChatStore.setState({
+      paperId: 1,
+      conversations: [makeConversation(1)],
+      activeConversationId: 1,
+      messages: [makeMessage(1, 1)],
+    });
+    const pending = deferred<Conversation>();
+    api.conversations.create.mockImplementation(() => pending.promise);
+
+    const creating = useChatStore.getState().newConversation(1);
+
+    const paperTwoConversations = [makeConversation(7, { paperId: 2 })];
+    const paperTwoMessages = [makeMessage(70, 7)];
+    const paperTwoFailed = {
+      paperId: 2,
+      conversationId: 7,
+      question: '新文献的问题',
+      fullTextMode: false,
+    };
+    useChatStore.setState({
+      paperId: 2,
+      conversations: paperTwoConversations,
+      activeConversationId: 7,
+      messages: paperTwoMessages,
+      lastFailedSendArgs: paperTwoFailed,
+    });
+
+    pending.resolve(makeConversation(10, { paperId: 1 }));
+    await creating;
+
+    const state = useChatStore.getState();
+    expect(api.chat.send).not.toHaveBeenCalled();
+    expect(state.paperId).toBe(2);
+    expect(state.conversations).toEqual(paperTwoConversations);
+    expect(state.activeConversationId).toBe(7);
+    expect(state.messages).toEqual(paperTwoMessages);
+    expect(state.lastFailedSendArgs).toEqual(paperTwoFailed);
   });
 
   it('openConversation 载入消息并停止展示旧流', async () => {

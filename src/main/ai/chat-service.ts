@@ -3,7 +3,7 @@ import type { AiSettings, ChatSendRequest } from '@shared/types';
 import type { AiClient, AiContentPart, AiMessage } from './client';
 import { assembleChatContext } from './context';
 import type { AssembleOutput } from './context';
-import { appendMessage, listMessages } from '../db/conversations';
+import { appendMessage, getConversation, listMessages } from '../db/conversations';
 import { getPaper } from '../db/papers';
 import { getPages } from '../db/pages';
 
@@ -70,6 +70,12 @@ function prepareChat(
     const paper = getPaper(deps.db, req.paperId);
     if (paper === null) {
       throw new Error(`Paper not found: ${req.paperId}`);
+    }
+    // The renderer installs conversations per paper; reject a stale or mixed
+    // (paper, conversation) pair before the setup transaction writes anything.
+    const conversation = getConversation(deps.db, req.conversationId);
+    if (conversation === null || conversation.paperId !== req.paperId) {
+      throw new Error('对话不存在或不属于当前文献');
     }
     const pages = getPages(deps.db, paper.id);
     const settings = deps.getSettings();

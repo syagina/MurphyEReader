@@ -17,7 +17,7 @@ import {
 } from './prompts';
 import { createNote, listNotes } from '../db/notes';
 import { getPaper } from '../db/papers';
-import { getPageText, getPages } from '../db/pages';
+import { getPages } from '../db/pages';
 
 export type NoteKind = 'summary' | 'concept' | 'innovation';
 
@@ -105,18 +105,42 @@ async function generateConcept(
   paper: Paper,
   params: NoteParams,
 ): Promise<Note> {
+  const settings = deps.getSettings();
+  const pages = getPages(deps.db, paper.id);
   const pageNo = params.currentPageNo ?? 1;
   const concept = deriveConcept(params);
-  const pageText = getPageText(deps.db, paper.id, pageNo);
   const base = buildDepthPrompt(concept, params.selectionText ?? '');
-  const contextPages =
-    pageText === null ? [] : [{ paperId: paper.id, pageNo, text: pageText }];
-  const system = `${base.system}\n\n${buildPaperContextBlock(
+
+  // The card must judge the concept's role across the whole paper, so the
+  // full text is preferred whenever it fits the budget. Otherwise retrieve the
+  // pages that actually mention the concept (plus selection); the current page
+  // is always forced in by `retrieveRelevantPages`.
+  let system = `${base.system}\n\n${buildPaperContextBlock(
     paper,
-    contextPages,
+    pages,
     params.selectionText,
     pageNo,
   )}`;
+  if (estimateTokens(system) > settings.tokenBudget) {
+    const baseSystem = `${base.system}\n\n${buildPaperContextBlock(
+      paper,
+      [],
+      params.selectionText,
+      pageNo,
+    )}`;
+    const query = [concept, params.selectionText].filter(Boolean).join(' ');
+    system = `${base.system}\n\n${buildPaperContextBlock(
+      paper,
+      retrieveRelevantPages(
+        pages,
+        query,
+        settings.tokenBudget - estimateTokens(baseSystem),
+        pageNo,
+      ),
+      params.selectionText,
+      pageNo,
+    )}`;
+  }
 
   const contentMd = await deps.ai.complete([
     { role: 'system', content: system },

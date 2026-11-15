@@ -1,7 +1,7 @@
 import { createServer } from 'node:http';
 import type { IncomingHttpHeaders, ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { AiClient } from '@main/ai/client';
 import type { AiConfig, AiMessage } from '@main/ai/client';
 
@@ -58,11 +58,16 @@ async function startServer(handler: TestHandler): Promise<TestServer> {
 }
 
 afterEach(async () => {
+  vi.unstubAllGlobals();
   const started = servers.splice(0);
   await Promise.all(started.map((server) => server.close()));
 });
 
-function createClient(baseUrl: string, overrides: Partial<AiConfig> = {}): AiClient {
+function createClient(
+  baseUrl: string,
+  overrides: Partial<AiConfig> = {},
+  timeoutMs?: number,
+): AiClient {
   const config: AiConfig = {
     baseUrl,
     apiKey: 'sk-test',
@@ -71,7 +76,9 @@ function createClient(baseUrl: string, overrides: Partial<AiConfig> = {}): AiCli
     temperature: 0.4,
     ...overrides,
   };
-  return new AiClient(() => config);
+  return timeoutMs === undefined
+    ? new AiClient(() => config)
+    : new AiClient(() => config, timeoutMs);
 }
 
 const MESSAGES: AiMessage[] = [{ role: 'user', content: '请总结这篇论文' }];
@@ -199,6 +206,27 @@ describe('AiClient.complete', () => {
     const client = createClient(server.baseUrl);
 
     await expect(client.complete(MESSAGES)).resolves.toBe('');
+  });
+});
+
+describe('AiClient 超时与中止', () => {
+  it('fetch 永不返回时超时映射为「请求超时」，complete 与 streamChat 一致', async () => {
+    vi.stubGlobal('fetch', () => new Promise<Response>(() => undefined));
+    const client = createClient('http://127.0.0.1:1', {}, 20);
+
+    await expect(client.complete(MESSAGES)).rejects.toThrow('请求超时');
+    await expect(client.streamChat(MESSAGES, () => {})).rejects.toThrow('请求超时');
+  });
+
+  it('complete 在调用方中止时抛出「已取消」而非超时', async () => {
+    vi.stubGlobal('fetch', () => new Promise<Response>(() => undefined));
+    const client = createClient('http://127.0.0.1:1', {}, 60_000);
+    const controller = new AbortController();
+
+    const pending = client.complete(MESSAGES, { signal: controller.signal });
+    controller.abort();
+
+    await expect(pending).rejects.toThrow('已取消');
   });
 });
 

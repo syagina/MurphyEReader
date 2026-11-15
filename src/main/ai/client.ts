@@ -27,6 +27,8 @@ interface ChatCompletionResponse {
 const API_KEY_INVALID = 'API Key 无效或已过期';
 const RATE_LIMITED = '请求过于频繁或额度不足';
 const CANCELLED = '已取消';
+const TIMEOUT = '请求超时';
+const DEFAULT_TIMEOUT_MS = 120_000;
 const MAX_SERVER_MESSAGE_LENGTH = 500;
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -57,13 +59,56 @@ async function errorFromResponse(response: Response): Promise<Error> {
   return new Error(`请求失败（HTTP ${response.status}）：${serverMessage}`);
 }
 
-function normalizeError(error: unknown, signal?: AbortSignal): Error {
-  if (
-    signal?.aborted === true ||
-    (typeof error === 'object' &&
-      error !== null &&
-      (error as { name?: unknown }).name === 'AbortError')
-  ) {
+function errorName(error: unknown): unknown {
+  return typeof error === 'object' && error !== null
+    ? (error as { name?: unknown }).name
+    : undefined;
+}
+
+/**
+ * Settles with `promise`, but rejects as soon as `signal` aborts. The original
+ * promise keeps its rejection handled so a late transport failure never
+ * surfaces as an unhandled rejection.
+ */
+function raceSignal<T>(promise: Promise<T>, signal: AbortSignal): Promise<T> {
+  if (signal.aborted) {
+    promise.catch(() => undefined);
+    return Promise.reject(signal.reason);
+  }
+  return new Promise<T>((resolve, reject) => {
+    const onAbort = (): void => {
+      reject(signal.reason);
+    };
+    signal.addEventListener('abort', onAbort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(value);
+      },
+      (error) => {
+        signal.removeEventListener('abort', onAbort);
+        reject(error);
+      },
+    );
+  });
+}
+
+function normalizeError(
+  error: unknown,
+  callerSignal?: AbortSignal,
+  timeoutSignal?: AbortSignal,
+): Error {
+  const name = errorName(error);
+  if (name === 'TimeoutError') {
+    return new Error(TIMEOUT);
+  }
+  if (callerSignal?.aborted === true) {
+    return new Error(CANCELLED);
+  }
+  if (timeoutSignal?.aborted === true) {
+    return new Error(TIMEOUT);
+  }
+  if (name === 'AbortError') {
     return new Error(CANCELLED);
   }
   return error instanceof Error ? error : new Error(String(error));
@@ -94,6 +139,7 @@ function parseDeltaContent(payload: string): string | undefined {
 async function readSseStream(
   response: Response,
   onDelta: (delta: string) => void,
+  signal?: AbortSignal,
 ): Promise<string> {
   const body = response.body;
   if (body === null) {
@@ -130,7 +176,10 @@ async function readSseStream(
 
   try {
     while (!finished) {
-      const { done, value } = await reader.read();
+      const { done, value } =
+        signal === undefined
+          ? await reader.read()
+          : await raceSignal(reader.read(), signal);
       if (done) {
         break;
       }
@@ -156,7 +205,10 @@ async function readSseStream(
 }
 
 export class AiClient {
-  constructor(private readonly getConfig: () => AiConfig) {}
+  constructor(
+    private readonly getConfig: () => AiConfig,
+    private readonly timeoutMs: number = DEFAULT_TIMEOUT_MS,
+  ) {}
 
   async streamChat(
     messages: AiMessage[],
@@ -164,27 +216,38 @@ export class AiClient {
     opts: { signal?: AbortSignal; model?: string } = {},
   ): Promise<string> {
     const config = this.getConfig();
+    const { signal, timeout } = this.createSignals(opts.signal);
     try {
-      const response = await this.postChat(config, messages, true, opts.model, opts.signal);
+      const response = await raceSignal(
+        this.postChat(config, messages, true, opts.model, signal),
+        signal,
+      );
       const contentType = response.headers.get('content-type') ?? '';
       if (contentType.includes('text/event-stream')) {
-        return await readSseStream(response, onDelta);
+        return await readSseStream(response, onDelta, signal);
       }
-      const content = extractMessageContent(await response.json());
+      const content = extractMessageContent(await raceSignal(response.json(), signal));
       onDelta(content);
       return content;
     } catch (error) {
-      throw normalizeError(error, opts.signal);
+      throw normalizeError(error, opts.signal, timeout);
     }
   }
 
-  async complete(messages: AiMessage[], opts: { model?: string } = {}): Promise<string> {
+  async complete(
+    messages: AiMessage[],
+    opts: { model?: string; signal?: AbortSignal } = {},
+  ): Promise<string> {
     const config = this.getConfig();
+    const { signal, timeout } = this.createSignals(opts.signal);
     try {
-      const response = await this.postChat(config, messages, false, opts.model);
-      return extractMessageContent(await response.json());
+      const response = await raceSignal(
+        this.postChat(config, messages, false, opts.model, signal),
+        signal,
+      );
+      return extractMessageContent(await raceSignal(response.json(), signal));
     } catch (error) {
-      throw normalizeError(error);
+      throw normalizeError(error, opts.signal, timeout);
     }
   }
 
@@ -205,6 +268,20 @@ export class AiClient {
     } catch (error) {
       return { ok: false, error: normalizeError(error).message };
     }
+  }
+
+  private createSignals(callerSignal?: AbortSignal): {
+    signal: AbortSignal;
+    timeout: AbortSignal;
+  } {
+    const timeout = AbortSignal.timeout(this.timeoutMs);
+    return {
+      signal:
+        callerSignal === undefined
+          ? timeout
+          : AbortSignal.any([callerSignal, timeout]),
+      timeout,
+    };
   }
 
   private async postChat(

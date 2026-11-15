@@ -310,6 +310,12 @@ export const useChatStore = create<ChatState>()((set, get) => {
 
     async newConversation(paperId) {
       const conversation = await window.api.conversations.create(paperId, '新对话');
+      // A paper switch during the create round-trip must not install this
+      // conversation under the new paper's panel. The created row stays
+      // orphaned in the database; never delete data from here.
+      if (get().paperId !== paperId) {
+        return;
+      }
       ++viewSeq;
       set((state) => ({
         paperId,
@@ -370,6 +376,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
     },
 
     async send(req) {
+      const paperId = req.paperId;
       const question = req.question.trim();
       if (question === '') {
         return;
@@ -380,7 +387,13 @@ export const useChatStore = create<ChatState>()((set, get) => {
       if (conversationId === null) {
         try {
           const title = question.slice(0, 20) || '新对话';
-          const conversation = await window.api.conversations.create(req.paperId, title);
+          const conversation = await window.api.conversations.create(paperId, title);
+          // The user can switch papers while the conversation is being
+          // created; in that case neither the new row nor the optimistic
+          // question may be installed into the new paper's view.
+          if (get().paperId !== paperId) {
+            return;
+          }
           set((state) => ({
             conversations: sortConversations([...state.conversations, conversation]),
             activeConversationId: conversation.id,

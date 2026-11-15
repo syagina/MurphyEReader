@@ -552,6 +552,43 @@ describe('startChat setup errors', () => {
     expect(listMessages(db, 1)).toEqual([]);
   });
 
+  it('会话属于其他文献时 emit chat:error 且不写入任何消息', async () => {
+    const { paper } = setupPaper();
+    // A second paper (and its conversation) that the request must not touch.
+    const { conversationId: foreignConversationId } = setupPaper();
+    let streamCalled = false;
+    const sink = createEventSink();
+    const deps = makeDeps(
+      {
+        async streamChat() {
+          streamCalled = true;
+          return '不应调用';
+        },
+      },
+      sink,
+    );
+    const errorPromise = sink.waitFor('chat:error');
+
+    const result = await startChat(
+      deps,
+      makeRequest(paper, foreignConversationId),
+    );
+    const payload = (await errorPromise) as {
+      requestId: string;
+      error: string;
+    };
+
+    expect(payload).toEqual({
+      requestId: result.requestId,
+      error: '对话不存在或不属于当前文献',
+    });
+    expect(streamCalled).toBe(false);
+    const count = db
+      .prepare('SELECT COUNT(*) AS count FROM messages')
+      .get() as { count: number };
+    expect(count.count).toBe(0);
+  });
+
   it('会话不存在导致保存用户消息失败时 emit chat:error 且不留下消息', async () => {
     const { paper } = setupPaper();
     const sink = createEventSink();

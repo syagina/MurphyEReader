@@ -73,6 +73,16 @@ export function listConversations(
   return rows.map(mapConversationRow);
 }
 
+export function getConversation(
+  db: Database.Database,
+  id: number,
+): Conversation | null {
+  const row = db
+    .prepare('SELECT * FROM conversations WHERE id = ?')
+    .get(id) as ConversationRow | undefined;
+  return row ? mapConversationRow(row) : null;
+}
+
 export function renameConversation(
   db: Database.Database,
   id: number,

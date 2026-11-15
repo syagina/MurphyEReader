@@ -414,6 +414,21 @@ describe('useNotesStore.generate', () => {
     expect(state.generating).toBeNull();
   });
 
+  it('生成超时时写入错误、重置生成状态且不保存笔记', async () => {
+    useNotesStore.setState({ paperId: 1, notes: [] });
+    api.generate.mockRejectedValue(new Error('请求超时'));
+
+    const result = await useNotesStore.getState().generate('summary', {
+      paperId: 1,
+    });
+
+    const state = useNotesStore.getState();
+    expect(result).toBeNull();
+    expect(state.error).toBe('请求超时');
+    expect(state.notes).toEqual([]);
+    expect(state.generating).toBeNull();
+  });
+
   it('生成期间暴露 generating 状态', async () => {
     useNotesStore.setState({ paperId: 1, notes: [] });
     const pending = deferred<Note | null>();

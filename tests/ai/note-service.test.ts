@@ -1,6 +1,7 @@
 import type Database from 'better-sqlite3';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AiClient, AiMessage } from '@main/ai/client';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { AiClient } from '@main/ai/client';
+import type { AiMessage } from '@main/ai/client';
 import { chunkPages } from '@main/ai/context';
 import { generateNote } from '@main/ai/note-service';
 import type { NoteDeps } from '@main/ai/note-service';
@@ -24,6 +25,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllGlobals();
   db.close();
 });
 
@@ -220,12 +222,12 @@ describe('generateNote summary', () => {
 });
 
 describe('generateNote concept', () => {
-  it('使用当前页与选文生成概念卡，标题为概念名', async () => {
+  it('使用整篇论文与选文生成概念卡，标题为概念名', async () => {
     const paper = makePaper('Transformer 综述');
     seedPages(paper.id, [
       { pageNo: 1, text: '第一页内容' },
       { pageNo: 2, text: '第二页介绍注意力机制' },
-      { pageNo: 3, text: '第三页内容' },
+      { pageNo: 3, text: '第三页再次讨论注意力机制' },
     ]);
     const fake = createFakeComplete('概念讲解');
 
@@ -246,10 +248,71 @@ describe('generateNote concept', () => {
     const [system, user] = fake.calls[0];
     expect(textOf(user)).toContain('注意力机制');
     expect(textOf(system)).toContain(DEPTH_SYSTEM_PROMPT);
+    expect(textOf(system)).toContain('[第 1 页]');
     expect(textOf(system)).toContain('[第 2 页]');
     expect(textOf(system)).toContain('第二页介绍注意力机制');
-    expect(textOf(system)).not.toContain('[第 1 页]');
+    expect(textOf(system)).toContain('[第 3 页]');
     expect(textOf(system)).toContain('注意力机制是……');
+  });
+
+  it('全文超出预算时保留当前页并检索概念出现的其他页面', async () => {
+    const paper = makePaper('长文');
+    const filler = (marker: string) => `${marker}${'无关内容'.repeat(400)}`;
+    seedPages(paper.id, [
+      { pageNo: 1, text: filler('第一页') },
+      { pageNo: 2, text: '第二页介绍注意力机制的定义' },
+      { pageNo: 3, text: filler('第三页') },
+      { pageNo: 4, text: '第四页讨论注意力机制的应用' },
+      { pageNo: 5, text: filler('第五页') },
+    ]);
+    const fake = createFakeComplete('概念讲解');
+
+    const note = await generateNote(
+      makeDeps(fake.ai, makeSettings({ tokenBudget: 700 })),
+      'concept',
+      {
+        paperId: paper.id,
+        conceptTitle: '注意力机制',
+        selectionText: '注意力机制是……',
+        currentPageNo: 2,
+      },
+    );
+
+    expect(note).not.toBeNull();
+    expect(fake.calls).toHaveLength(1);
+    const system = textOf(fake.calls[0][0]);
+    expect(system).toContain(DEPTH_SYSTEM_PROMPT);
+    expect(system).toContain('[第 2 页]');
+    expect(system).toContain('第二页介绍注意力机制的定义');
+    expect(system).toContain('[第 4 页]');
+    expect(system).toContain('第四页讨论注意力机制的应用');
+    // Only the current page and pages that mention the concept fit the budget.
+    expect(system).not.toContain('[第 1 页]');
+    expect(system).not.toContain('[第 3 页]');
+    expect(system).not.toContain('[第 5 页]');
+  });
+
+  it('AI 请求超时时抛出「请求超时」且不保存笔记', async () => {
+    const paper = makePaper();
+    seedPages(paper.id, [{ pageNo: 1, text: '第一页内容' }]);
+    vi.stubGlobal('fetch', () => new Promise<Response>(() => undefined));
+    const ai = new AiClient(
+      () => ({
+        baseUrl: 'http://127.0.0.1:1',
+        apiKey: 'sk-test',
+        chatModel: 'chat-model',
+        visionModel: 'vision-model',
+        temperature: 0.3,
+      }),
+      10,
+    );
+
+    await expect(
+      generateNote(makeDeps(ai), 'summary', { paperId: paper.id }),
+    ).rejects.toThrow('请求超时');
+    expect(db.prepare('SELECT COUNT(*) AS count FROM notes').get()).toEqual({
+      count: 0,
+    });
   });
 
   it('未提供概念名时取选文首行前 30 字，缺失时回退为“概念”', async () => {
