@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 import type { AiMessage } from '@main/ai/client';
 import { translateSelection } from '@main/ai/translation-service';
 import type { TranslationDeps } from '@main/ai/translation-service';
+import { TRANSLATION_FAILED } from '@shared/translation';
 
 interface FakeComplete {
   complete: ReturnType<typeof vi.fn>;
@@ -90,6 +91,26 @@ describe('translateSelection', () => {
     await expect(translateSelection(deps, { text: 'hello' })).rejects.toThrow(
       '请先在设置中配置 AI 接口',
     );
+    expect(complete).not.toHaveBeenCalled();
+  });
+
+  it('sanitizes a configuration lookup failure and never calls the model', async () => {
+    const complete = vi.fn(async () => '译文');
+    const deps: TranslationDeps = {
+      complete,
+      isConfigured: () => {
+        throw new Error('密钥解密失败: sk-secret');
+      },
+    };
+
+    const error = await translateSelection(deps, { text: 'loss' }).then(
+      () => null,
+      (reason: unknown) => reason,
+    );
+
+    expect(error).toBeInstanceOf(Error);
+    expect((error as Error).message).toBe(TRANSLATION_FAILED);
+    expect((error as Error).message).not.toContain('sk-secret');
     expect(complete).not.toHaveBeenCalled();
   });
 

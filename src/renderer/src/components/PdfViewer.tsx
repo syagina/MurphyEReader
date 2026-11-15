@@ -2,7 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { Paper } from '@shared/types';
-import { TRANSLATION_TARGET_LABELS, detectTranslationTarget } from '@shared/translation';
+import {
+  TRANSLATION_NOT_CONFIGURED,
+  TRANSLATION_TARGET_LABELS,
+  detectTranslationTarget,
+} from '@shared/translation';
 import {
   buildPageWindow,
   configurePdfWorker,
@@ -12,6 +16,8 @@ import {
 import { errorMessage } from '../lib/errors';
 import { cropToDataUrl, toSourceRect } from '../lib/screenshot';
 import type { Rect } from '../lib/screenshot';
+import { normalizeTranslationError } from '../lib/translation-error';
+import { translationCardPosition } from '../lib/translation-position';
 import { useReaderStore } from '../stores/reader';
 import type { ReaderSelection } from '../stores/reader';
 import { useLibraryStore } from '../stores/library';
@@ -56,7 +62,12 @@ interface TranslationCardTarget {
   seq: number;
 }
 
-const AI_NOT_CONFIGURED = '请先在设置中配置 AI 接口';
+// Card geometry: width matches styles.css; the height is the estimated maximum
+// (3-line original + 300px scrollable result + status + actions).
+const TRANSLATION_CARD_WIDTH = 420;
+const TRANSLATION_CARD_MAX_HEIGHT = 440;
+const TRANSLATION_CARD_GAP = 48;
+const TRANSLATION_CARD_MARGIN = 8;
 
 export function PdfViewer({
   paper,
@@ -157,8 +168,8 @@ export function PdfViewer({
         if (translationSeqRef.current !== seq) {
           return;
         }
-        const message = errorMessage(error);
-        if (message.includes(AI_NOT_CONFIGURED)) {
+        const message = normalizeTranslationError(error);
+        if (message === TRANSLATION_NOT_CONFIGURED) {
           setTranslationUnconfigured(true);
         } else {
           setTranslationError(message);
@@ -616,14 +627,17 @@ export function PdfViewer({
     if (selection === null || toolbarPosition === null) {
       return;
     }
-    // The card is centered on `left` and 420px wide (see styles.css); keep it
-    // inside the window when the selection sits near an edge.
-    const halfWidth = Math.min(210, Math.max(0, window.innerWidth / 2 - 16));
-    const left = Math.min(
-      Math.max(toolbarPosition.left, halfWidth + 8),
-      Math.max(halfWidth + 8, window.innerWidth - halfWidth - 8),
-    );
-    startTranslation(selection.text, toolbarPosition.top + 48, left);
+    const position = translationCardPosition({
+      anchorTop: toolbarPosition.top,
+      anchorLeft: toolbarPosition.left,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      cardWidth: TRANSLATION_CARD_WIDTH,
+      cardHeight: TRANSLATION_CARD_MAX_HEIGHT,
+      gap: TRANSLATION_CARD_GAP,
+      margin: TRANSLATION_CARD_MARGIN,
+    });
+    startTranslation(selection.text, position.top, position.left);
   };
 
   const handleRelocate = async (): Promise<void> => {

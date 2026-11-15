@@ -3,6 +3,13 @@ import type { TranslationTarget } from './types';
 /** Longest selection accepted by free-selection translation, in code points. */
 export const TRANSLATION_MAX_CHARS = 6000;
 
+/** Exact user-facing messages of free-selection translation. */
+export const TRANSLATION_EMPTY_SELECTION = '请先选择要翻译的文本';
+export const TRANSLATION_TOO_LONG = '选中文本过长，请分段翻译';
+export const TRANSLATION_NOT_CONFIGURED = '请先在设置中配置 AI 接口';
+export const TRANSLATION_EMPTY_RESULT = '翻译结果为空，请重试';
+export const TRANSLATION_FAILED = '翻译失败，请稍后重试';
+
 /** Human-readable names used in prompts and the translation card. */
 export const TRANSLATION_TARGET_LABELS: Record<TranslationTarget, string> = {
   'zh-CN': '简体中文',

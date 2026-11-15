@@ -1,6 +1,11 @@
 import {
+  TRANSLATION_EMPTY_RESULT,
+  TRANSLATION_EMPTY_SELECTION,
+  TRANSLATION_FAILED,
   TRANSLATION_MAX_CHARS,
+  TRANSLATION_NOT_CONFIGURED,
   TRANSLATION_TARGET_LABELS,
+  TRANSLATION_TOO_LONG,
   detectTranslationTarget,
 } from '@shared/translation';
 import type { SelectionTranslationResult, TranslationTarget } from '@shared/types';
@@ -19,11 +24,6 @@ export interface TranslationInput {
   text: string;
 }
 
-const SELECTION_EMPTY = '请先选择要翻译的文本';
-const SELECTION_TOO_LONG = '选中文本过长，请分段翻译';
-const AI_NOT_CONFIGURED = '请先在设置中配置 AI 接口';
-const EMPTY_TRANSLATION = '翻译结果为空，请重试';
-const TRANSLATION_FAILED = '翻译失败，请稍后重试';
 const TRANSLATION_TEMPERATURE = 0.2;
 const TRANSLATION_TIMEOUT_MS = 60_000;
 
@@ -46,14 +46,21 @@ export async function translateSelection(
 ): Promise<SelectionTranslationResult> {
   const text = input.text.trim();
   if (text === '') {
-    throw new Error(SELECTION_EMPTY);
+    throw new Error(TRANSLATION_EMPTY_SELECTION);
   }
   // Code points, not UTF-16 units: emoji and rare CJK count once.
   if ([...text].length > TRANSLATION_MAX_CHARS) {
-    throw new Error(SELECTION_TOO_LONG);
+    throw new Error(TRANSLATION_TOO_LONG);
   }
-  if (!deps.isConfigured()) {
-    throw new Error(AI_NOT_CONFIGURED);
+  let configured: boolean;
+  try {
+    configured = deps.isConfigured();
+  } catch {
+    // A settings/key-decryption failure must not leak its raw error either.
+    throw new Error(TRANSLATION_FAILED);
+  }
+  if (!configured) {
+    throw new Error(TRANSLATION_NOT_CONFIGURED);
   }
 
   const targetLang = detectTranslationTarget(text);
@@ -74,7 +81,7 @@ export async function translateSelection(
 
   const translation = answer.trim();
   if (translation === '') {
-    throw new Error(EMPTY_TRANSLATION);
+    throw new Error(TRANSLATION_EMPTY_RESULT);
   }
   return { translation, targetLang };
 }

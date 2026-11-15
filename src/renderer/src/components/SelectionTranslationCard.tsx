@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { TRANSLATION_NOT_CONFIGURED } from '@shared/translation';
 
 export interface SelectionTranslationCardProps {
   text: string;
@@ -92,7 +93,7 @@ export function SelectionTranslationCard({
         </p>
       ) : unconfigured ? (
         <p className="selection-translation-status" role="alert">
-          请先在设置中配置 AI 接口
+          {TRANSLATION_NOT_CONFIGURED}
         </p>
       ) : error !== null ? (
         <p className="selection-translation-error" role="alert">

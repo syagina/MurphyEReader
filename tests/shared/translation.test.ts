@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   TRANSLATION_MAX_CHARS,
+  TRANSLATION_NOT_CONFIGURED,
   TRANSLATION_TARGET_LABELS,
   detectTranslationTarget,
   translationCjkRatio,
@@ -16,6 +17,10 @@ describe('translation constants', () => {
       'zh-CN': '简体中文',
       en: 'English',
     });
+  });
+
+  it('exposes the exact unconfigured-AI message shared by service and renderer', () => {
+    expect(TRANSLATION_NOT_CONFIGURED).toBe('请先在设置中配置 AI 接口');
   });
 });
 
@@ -36,8 +41,8 @@ describe('translationCjkRatio', () => {
   });
 
   it('counts astral code points once instead of per UTF-16 unit', () => {
-    // U+20000 is a CJK extension character outside the three configured BMP
-    // ranges; one emoji plus one Han character must still yield 1/2.
+    // The emoji is U+1F600, outside the configured CJK ranges, and counts as a
+    // single code point; one Han character out of two therefore yields 1/2.
     expect(translationCjkRatio('😀中')).toBe(0.5);
   });
 });
