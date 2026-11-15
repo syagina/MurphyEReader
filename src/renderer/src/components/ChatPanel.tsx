@@ -422,8 +422,23 @@ export function ChatPanel({
                   type="button"
                   className="chat-note-button"
                   title="把这条回答保存为笔记"
+                  aria-label="把这条回答保存为笔记"
                   onClick={() => openWholeAnswerNote(message)}
                 >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                    focusable="false"
+                  >
+                    <path d="M6 3h12a1 1 0 0 1 1 1v17l-7-4-7 4V4a1 1 0 0 1 1-1z" />
+                  </svg>
                   存为笔记
                 </button>
               </div>
