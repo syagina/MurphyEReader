@@ -1,4 +1,5 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
+import katex from 'katex';
 import { parseCitations } from '../lib/citations';
 import { parseMarkdown } from '../lib/markdown';
 import type { MarkdownBlock, MarkdownInline } from '../lib/markdown';
@@ -36,6 +37,43 @@ function MarkdownText({ text }: { text: string }): React.JSX.Element {
   );
 }
 
+/**
+ * Renders one formula through KaTeX. KaTeX writes its own DOM into the span;
+ * trust is disabled so `\href`, `\htmlClass` and similar commands cannot
+ * inject URLs or markup from model output.
+ */
+function MathNode({ text, display }: { text: string; display: boolean }): React.JSX.Element {
+  const containerRef = useRef<HTMLSpanElement | null>(null);
+
+  useEffect(() => {
+    const container = containerRef.current;
+    if (container === null) {
+      return;
+    }
+    try {
+      katex.render(text, container, {
+        displayMode: display,
+        throwOnError: false,
+        trust: false,
+        strict: 'ignore',
+        output: 'html',
+      });
+    } catch {
+      // KaTeX's own error span is preferable, but never let a bad formula
+      // break the surrounding answer.
+      container.textContent = text;
+    }
+  }, [text, display]);
+
+  return (
+    <span
+      ref={containerRef}
+      className={display ? 'markdown-math markdown-math-display' : 'markdown-math'}
+      aria-label={text}
+    />
+  );
+}
+
 function renderInline(nodes: MarkdownInline[]): React.ReactNode[] {
   return nodes.map((node, index) => {
     switch (node.type) {
@@ -49,6 +87,8 @@ function renderInline(nodes: MarkdownInline[]): React.ReactNode[] {
             {node.text}
           </code>
         );
+      case 'math':
+        return <MathNode key={index} text={node.text} display={node.display} />;
       case 'break':
         return <br key={index} />;
     }
@@ -72,6 +112,12 @@ function renderBlock(block: MarkdownBlock, key: number): React.ReactNode {
         <pre className="markdown-code" key={key}>
           <code>{block.text}</code>
         </pre>
+      );
+    case 'mathBlock':
+      return (
+        <div className="markdown-math-block" key={key}>
+          <MathNode text={block.text} display />
+        </div>
       );
     case 'list': {
       const List = block.ordered ? 'ol' : 'ul';

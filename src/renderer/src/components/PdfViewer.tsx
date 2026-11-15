@@ -1,7 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
-import 'pdfjs-dist/web/pdf_viewer.css';
 import type { Paper } from '@shared/types';
 import {
   buildPageWindow,
@@ -21,6 +20,8 @@ import { RegionCapture } from './RegionCapture';
 
 export interface PdfViewerProps {
   paper: Paper;
+  focusMode: boolean;
+  onToggleFocusMode(): void;
   onAskAI?(selection: ReaderSelection): void;
   onJudgeDepth?(selection: ReaderSelection): void;
   onSaveNote?(selection: ReaderSelection): void;
@@ -45,6 +46,8 @@ interface ToolbarPosition {
 
 export function PdfViewer({
   paper,
+  focusMode,
+  onToggleFocusMode,
   onAskAI,
   onJudgeDepth,
   onSaveNote,
@@ -318,6 +321,64 @@ export function PdfViewer({
       programmaticScrollRef.current = null;
     };
   }, [pdf, pageSizes.length, currentPage]);
+
+  // Ctrl/Cmd + wheel zooms the PDF, not the Electron page. The listener is
+  // native and non-passive so preventDefault reliably stops Chromium's own
+  // page zoom. The scroll position is adjusted afterwards to keep the point
+  // under the cursor on the same part of the same page.
+  useEffect(() => {
+    const container = scrollRef.current;
+    if (container === null) {
+      return;
+    }
+    const handleWheel = (event: WheelEvent): void => {
+      if (!event.ctrlKey && !event.metaKey) {
+        return;
+      }
+      event.preventDefault();
+      const state = useReaderStore.getState();
+      const direction = event.deltaY < 0 ? 1 : -1;
+      const nextZoom = Math.round((state.zoom + direction * 0.1) * 10) / 10;
+      const clamped = Math.min(3, Math.max(0.5, nextZoom));
+      if (clamped === state.zoom) {
+        return;
+      }
+
+      const target =
+        event.target instanceof Element
+          ? event.target.closest<HTMLElement>('[data-page-no]')
+          : null;
+      const bounds = target?.getBoundingClientRect() ?? null;
+      const pageNo = target === null ? null : Number(target.dataset.pageNo);
+      const anchorRatio =
+        bounds === null || bounds.height === 0
+          ? 0
+          : Math.min(1, Math.max(0, (event.clientY - bounds.top) / bounds.height));
+
+      state.setZoom(clamped);
+      if (pageNo === null || bounds === null) {
+        return;
+      }
+      // The page wrapper is resized by React before the next animation frame.
+      window.requestAnimationFrame(() => {
+        const current = scrollRef.current;
+        if (current === null) {
+          return;
+        }
+        const nextTarget = current.querySelector<HTMLElement>(
+          `[data-page-no="${pageNo}"]`,
+        );
+        if (nextTarget === null) {
+          return;
+        }
+        const nextBounds = nextTarget.getBoundingClientRect();
+        const anchoredY = nextBounds.top + anchorRatio * nextBounds.height;
+        current.scrollTop += anchoredY - event.clientY;
+      });
+    };
+    container.addEventListener('wheel', handleWheel, { passive: false });
+    return () => container.removeEventListener('wheel', handleWheel);
+  }, [pdf]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
@@ -655,6 +716,16 @@ export function PdfViewer({
           >
             中/英
           </button>
+          <button
+            type="button"
+            className={focusMode ? 'pdf-toolbar-button active' : 'pdf-toolbar-button'}
+            aria-label={focusMode ? '退出全屏阅读' : '全屏阅读'}
+            title={focusMode ? '退出全屏阅读（Esc）' : '全屏阅读（F11）'}
+            aria-pressed={focusMode}
+            onClick={onToggleFocusMode}
+          >
+            {focusMode ? '退出全屏' : '全屏'}
+          </button>
           <div className="pdf-zoom">
             <button
               type="button"
@@ -666,7 +737,9 @@ export function PdfViewer({
             >
               −
             </button>
-            <span className="pdf-zoom-value">{Math.round(zoom * 100)}%</span>
+            <span className="pdf-zoom-value" title="Ctrl + 滚轮可缩放">
+              {Math.round(zoom * 100)}%
+            </span>
             <button
               type="button"
               className="pdf-toolbar-button"

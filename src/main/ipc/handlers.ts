@@ -277,6 +277,15 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     },
   );
 
+  electron.ipcMain.handle('window:setFullscreen', (_event, fullscreen: boolean) => {
+    const win = deps.mainWindow();
+    if (win === null) {
+      return false;
+    }
+    win.setFullScreen(fullscreen);
+    return win.isFullScreen();
+  });
+
   electron.ipcMain.handle('settings:get', () => getSettings(db, secret));
 
   electron.ipcMain.handle('settings:set', (_event, input: AiSettingsInput) =>

@@ -76,6 +76,10 @@ export interface PaperLensApi {
   exportFile: {
     save(suggestedName: string, content: string): Promise<string | null>;
   };
+  window: {
+    setFullscreen(fullscreen: boolean): Promise<boolean>;
+    onFullscreenChange(cb: (fullscreen: boolean) => void): () => void;
+  };
   settings: {
     get(): Promise<AiSettings>;
     set(input: AiSettingsInput): Promise<AiSettings>;

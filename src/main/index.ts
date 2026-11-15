@@ -24,6 +24,14 @@ function createWindow(): void {
   win.on('closed', () => {
     mainWindow = null;
   });
+  // The OS can leave fullscreen without going through our IPC handler (F11,
+  // Escape, window controls); keep the renderer's focus mode in sync.
+  win.on('enter-full-screen', () => {
+    win.webContents.send('window:fullscreen-changed', true);
+  });
+  win.on('leave-full-screen', () => {
+    win.webContents.send('window:fullscreen-changed', false);
+  });
 
   if (process.env['ELECTRON_RENDERER_URL']) {
     win.loadURL(process.env['ELECTRON_RENDERER_URL']);

@@ -3,6 +3,7 @@ import type { OutlineNode } from '@shared/types';
 interface OutlinePanelProps {
   outline: OutlineNode[];
   onJump(pageNo: number): void;
+  onClose(): void;
 }
 
 interface OutlineItemsProps {
@@ -48,10 +49,25 @@ function OutlineItems({ nodes, depth, onJump }: OutlineItemsProps): React.JSX.El
 }
 
 /** Recursive table of contents for the opened paper. */
-export function OutlinePanel({ outline, onJump }: OutlinePanelProps): React.JSX.Element {
+export function OutlinePanel({
+  outline,
+  onJump,
+  onClose,
+}: OutlinePanelProps): React.JSX.Element {
   return (
     <nav className="outline-panel" aria-label="大纲">
-      <div className="outline-header">大纲</div>
+      <div className="outline-header">
+        <span>大纲</span>
+        <button
+          type="button"
+          className="outline-close"
+          aria-label="隐藏大纲"
+          title="隐藏大纲"
+          onClick={onClose}
+        >
+          «
+        </button>
+      </div>
       {outline.length === 0 ? (
         <p className="outline-empty">本文无大纲</p>
       ) : (

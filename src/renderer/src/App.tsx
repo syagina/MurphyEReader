@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { Paper, SearchResult } from '@shared/types';
 import { ChatPanel } from './components/ChatPanel';
-import { LibraryPanel } from './components/LibraryPanel';
+import { LibraryView } from './components/LibraryView';
 import { NotesPanel } from './components/NotesPanel';
 import { OutlinePanel } from './components/OutlinePanel';
 import { PdfViewer } from './components/PdfViewer';
@@ -30,8 +30,12 @@ type PendingLocate =
 
 export default function App(): React.JSX.Element {
   const [openedPaper, setOpenedPaper] = useState<Paper | null>(null);
-  const [libraryCollapsed, setLibraryCollapsed] = useState(false);
+  const [libraryView, setLibraryView] = useState(true);
+  const [outlineHidden, setOutlineHidden] = useState(false);
   const [aiCollapsed, setAiCollapsed] = useState(false);
+  // Focus mode hides the top bar, library chrome and outline, and asks the
+  // main process for a real full-screen window.
+  const [focusMode, setFocusMode] = useState(false);
   const [aiTab, setAiTab] = useState<AiTab>('chat');
   const [conceptPrompt, setConceptPrompt] = useState<ConceptPrompt | null>(null);
   const [pendingLocate, setPendingLocate] = useState<PendingLocate | null>(null);
@@ -58,8 +62,18 @@ export default function App(): React.JSX.Element {
       return;
     }
     const current = papers.find((paper) => paper.id === openedPaper.id);
-    if (current !== undefined && current !== openedPaper) {
-      setOpenedPaper(current);
+    if (current !== undefined) {
+      if (current !== openedPaper) {
+        setOpenedPaper(current);
+      }
+      return;
+    }
+    // The open paper was deleted (or its metadata reload came back without
+    // it). Never leave the reader pointing at a row that no longer exists.
+    if (!useLibraryStore.getState().loading) {
+      setOpenedPaper(null);
+      setLibraryView(true);
+      setFocusMode(false);
     }
   }, [papers, openedPaper]);
 
@@ -129,6 +143,76 @@ export default function App(): React.JSX.Element {
     useReaderStore.getState().jumpToPage(pageNo);
   };
 
+  const leaveFocusMode = (): void => {
+    setFocusMode(false);
+    void window.api.window.setFullscreen(false).catch(() => {
+      // The CSS focus layout still exits even if the window manager refuses.
+    });
+  };
+
+  const enterFocusMode = (): void => {
+    // Collapse the AI panel to its rail so the page gets the full width; the
+    // rail stays available when the reader wants to ask a question.
+    setAiCollapsed(true);
+    setFocusMode(true);
+    void window.api.window.setFullscreen(true).catch(() => {
+      // Keep the distraction-free CSS layout when native fullscreen is unavailable.
+    });
+  };
+
+  const toggleFocusMode = (): void => {
+    if (focusMode) {
+      leaveFocusMode();
+    } else {
+      enterFocusMode();
+    }
+  };
+
+  const handleOpenPaper = (paper: Paper): void => {
+    setClickError(null);
+    setPendingLocate(null);
+    useReaderStore.getState().clearInitialPage();
+    setOpenedPaper(paper);
+    setLibraryView(false);
+  };
+
+  const handleShowLibrary = (): void => {
+    setLibraryView(true);
+    if (focusMode) {
+      leaveFocusMode();
+    }
+  };
+
+  const handleContinueReading = (): void => {
+    if (openedPaper !== null) {
+      setLibraryView(false);
+    }
+  };
+
+  // Native fullscreen can be toggled by the OS (F11/Escape, window buttons).
+  // Mirror those changes into focus mode so hidden chrome comes back.
+  useEffect(() => {
+    return window.api.window.onFullscreenChange((fullscreen) => {
+      setFocusMode(fullscreen);
+    });
+  }, []);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'F11' && openedPaper !== null) {
+        event.preventDefault();
+        toggleFocusMode();
+        return;
+      }
+      if (event.key === 'Escape' && focusMode) {
+        event.preventDefault();
+        leaveFocusMode();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  });
+
   const handleSearchSelect = async (result: SearchResult): Promise<void> => {
     const seq = ++locateSeqRef.current;
     const search = useSearchStore.getState();
@@ -193,6 +277,7 @@ export default function App(): React.JSX.Element {
           useReaderStore.getState().requestInitialPage(paper.id, targetPage);
         }
       }
+      setLibraryView(false);
 
       if (locate !== null) {
         setAiCollapsed(false);
@@ -268,10 +353,29 @@ export default function App(): React.JSX.Element {
     useChatStore.getState().requestFocus();
   };
 
+  const showLibrary = libraryView || openedPaper === null;
+
   return (
-    <div className="app-frame">
+    <div className={focusMode && !showLibrary ? 'app-frame reader-focus' : 'app-frame'}>
       <header className="app-topbar">
-        <span className="app-brand">PaperLens</span>
+        <button
+          type="button"
+          className="app-brand"
+          title="返回文献库"
+          onClick={handleShowLibrary}
+        >
+          PaperLens
+        </button>
+        {!showLibrary && openedPaper !== null && (
+          <div className="topbar-reader-context">
+            <button type="button" className="topbar-back" onClick={handleShowLibrary}>
+              ← 文献库
+            </button>
+            <span className="topbar-paper-title" title={openedPaper.title}>
+              {openedPaper.title}
+            </span>
+          </div>
+        )}
         <div className="global-search">
           <input
             ref={searchInputRef}
@@ -317,40 +421,37 @@ export default function App(): React.JSX.Element {
         </button>
       </header>
 
-      <div className="app-shell">
-        <aside
-          className={libraryCollapsed ? 'sidebar collapsed' : 'sidebar'}
-          aria-label="文献库栏"
-        >
-          <div className="panel-bar">
-            {!libraryCollapsed && <span className="panel-heading">文献库</span>}
-            <button
-              type="button"
-              className="rail-toggle"
-              aria-label={libraryCollapsed ? '展开文献栏' : '收起文献栏'}
-              title={libraryCollapsed ? '展开文献栏' : '收起文献栏'}
-              onClick={() => setLibraryCollapsed((value) => !value)}
-            >
-              {libraryCollapsed ? '»' : '«'}
-            </button>
-          </div>
-          {!libraryCollapsed && <LibraryPanel onOpen={setOpenedPaper} />}
-        </aside>
-
-        <main
-          className={openedPaper === null ? 'reading-area' : 'reading-area reader-open'}
-          aria-label="阅读区"
-        >
-          {openedPaper === null ? (
-            <>
-              <h1 className="reading-title">PaperLens</h1>
-              <p className="placeholder-text">从左侧文献库打开一篇 PDF 开始阅读。</p>
-            </>
-          ) : (
+      {showLibrary ? (
+        <LibraryView
+          onOpen={handleOpenPaper}
+          onContinueReading={openedPaper === null ? undefined : handleContinueReading}
+          activePaperId={openedPaper === null ? null : openedPaper.id}
+        />
+      ) : openedPaper === null ? null : (
+        <div className="app-shell">
+          <main className="reading-area reader-open" aria-label="阅读区">
             <div className="reader-layout">
-              <OutlinePanel outline={openedPaper.outline} onJump={handleOutlineJump} />
+              {outlineHidden ? (
+                <button
+                  type="button"
+                  className="outline-rail"
+                  aria-label="显示大纲"
+                  title="显示大纲"
+                  onClick={() => setOutlineHidden(false)}
+                >
+                  大纲
+                </button>
+              ) : (
+                <OutlinePanel
+                  outline={openedPaper.outline}
+                  onJump={handleOutlineJump}
+                  onClose={() => setOutlineHidden(true)}
+                />
+              )}
               <PdfViewer
                 paper={openedPaper}
+                focusMode={focusMode}
+                onToggleFocusMode={toggleFocusMode}
                 onAskAI={() => {
                   setAiCollapsed(false);
                   setAiTab('chat');
@@ -361,29 +462,25 @@ export default function App(): React.JSX.Element {
                 onCaptureAsk={handleCaptureAsk}
               />
             </div>
-          )}
-        </main>
+          </main>
 
-        <aside
-          className={aiCollapsed ? 'ai-panel collapsed' : 'ai-panel'}
-          aria-label="AI 面板"
-        >
-          <div className="panel-bar">
-            {!aiCollapsed && <span className="panel-heading">AI 助手</span>}
-            <button
-              type="button"
-              className="rail-toggle"
-              aria-label={aiCollapsed ? '展开 AI 面板' : '收起 AI 面板'}
-              title={aiCollapsed ? '展开 AI 面板' : '收起 AI 面板'}
-              onClick={() => setAiCollapsed((value) => !value)}
-            >
-              {aiCollapsed ? '«' : '»'}
-            </button>
-          </div>
-          {!aiCollapsed &&
-            (openedPaper === null ? (
-              <p className="ai-placeholder">打开一篇文献后，即可就内容向 AI 提问。</p>
-            ) : (
+          <aside
+            className={aiCollapsed ? 'ai-panel collapsed' : 'ai-panel'}
+            aria-label="AI 面板"
+          >
+            <div className="panel-bar">
+              {!aiCollapsed && <span className="panel-heading">AI 助手</span>}
+              <button
+                type="button"
+                className="rail-toggle"
+                aria-label={aiCollapsed ? '展开 AI 面板' : '收起 AI 面板'}
+                title={aiCollapsed ? '展开 AI 面板' : '收起 AI 面板'}
+                onClick={() => setAiCollapsed((value) => !value)}
+              >
+                {aiCollapsed ? '«' : '»'}
+              </button>
+            </div>
+            {!aiCollapsed && (
               <>
                 <div className="ai-tabs" role="tablist" aria-label="AI 面板视图">
                   <button
@@ -459,9 +556,10 @@ export default function App(): React.JSX.Element {
                   </>
                 )}
               </>
-            ))}
-        </aside>
-      </div>
+            )}
+          </aside>
+        </div>
+      )}
 
       {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
     </div>

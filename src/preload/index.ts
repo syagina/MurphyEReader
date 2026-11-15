@@ -57,6 +57,10 @@ const api: PaperLensApi = {
     save: (suggestedName, content) =>
       ipcRenderer.invoke('export:save', suggestedName, content),
   },
+  window: {
+    setFullscreen: (fullscreen) => ipcRenderer.invoke('window:setFullscreen', fullscreen),
+    onFullscreenChange: (cb) => subscribe('window:fullscreen-changed', cb),
+  },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (input) => ipcRenderer.invoke('settings:set', input),

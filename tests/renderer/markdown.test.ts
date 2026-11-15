@@ -124,6 +124,81 @@ describe('parseMarkdown', () => {
     ]);
   });
 
+  it('解析单行 display 公式', () => {
+    expect(
+      parseMarkdown('$$\\mathcal{L}(x) = \\mathcal{L}_{rec} - \\frac{\\beta}{2}\\mathcal{L}_{KL}$$'),
+    ).toEqual([
+      {
+        type: 'mathBlock',
+        text: '\\mathcal{L}(x) = \\mathcal{L}_{rec} - \\frac{\\beta}{2}\\mathcal{L}_{KL}',
+      },
+    ]);
+  });
+
+  it('解析跨行 display 公式与 \\[ ... \\] 形式', () => {
+    expect(parseMarkdown('$$\na + b\n= c\n$$')).toEqual([
+      { type: 'mathBlock', text: 'a + b\n= c' },
+    ]);
+    expect(parseMarkdown('\\[\nx^2\n\\]')).toEqual([{ type: 'mathBlock', text: 'x^2' }]);
+  });
+
+  it('解析行内 $ 与 \\( \\) 公式', () => {
+    expect(parseMarkdown('当 $a^2+b^2=c^2$ 时，\\(x>0\\)。')).toEqual([
+      {
+        type: 'paragraph',
+        children: [
+          { type: 'text', text: '当 ' },
+          { type: 'math', text: 'a^2+b^2=c^2', display: false },
+          { type: 'text', text: ' 时，' },
+          { type: 'math', text: 'x>0', display: false },
+          { type: 'text', text: '。' },
+        ],
+      },
+    ]);
+  });
+
+  it('行内 $$ 公式标记为 display', () => {
+    expect(parseMarkdown('前 $$x$$ 后')).toEqual([
+      {
+        type: 'paragraph',
+        children: [
+          { type: 'text', text: '前 ' },
+          { type: 'math', text: 'x', display: true },
+          { type: 'text', text: ' 后' },
+        ],
+      },
+    ]);
+  });
+
+  it('货币金额、未闭合公式与代码块内的 $ 保持原文', () => {
+    expect(parseMarkdown('花费 $5 和 $10')).toEqual([
+      { type: 'paragraph', children: [{ type: 'text', text: '花费 $5 和 $10' }] },
+    ]);
+    expect(parseMarkdown('公式 $x+1 未闭合')).toEqual([
+      { type: 'paragraph', children: [{ type: 'text', text: '公式 $x+1 未闭合' }] },
+    ]);
+    expect(parseMarkdown('```\n$$x$$\n```')).toEqual([
+      { type: 'codeBlock', lang: '', text: '$$x$$' },
+    ]);
+  });
+
+  it('转义的美元符号保持为普通文本', () => {
+    expect(parseMarkdown('价格 \\$5')).toEqual([
+      { type: 'paragraph', children: [{ type: 'text', text: '价格 $5' }] },
+    ]);
+  });
+
+  it('公式内允许使用粗体解析器不误伤的下划线等 LaTeX 语法', () => {
+    expect(parseMarkdown('$\\mathbb{E}[X]=\\sum_i x_i p_i$')).toEqual([
+      {
+        type: 'paragraph',
+        children: [
+          { type: 'math', text: '\\mathbb{E}[X]=\\sum_i x_i p_i', display: false },
+        ],
+      },
+    ]);
+  });
+
   it('空文本与纯空白返回空数组', () => {
     expect(parseMarkdown('')).toEqual([]);
     expect(parseMarkdown('  \n\n')).toEqual([]);
