@@ -16,6 +16,7 @@ import { openDb } from '@main/db';
 import { replacePages } from '@main/db/pages';
 import { createPaper, getPaper, updatePaper } from '@main/db/papers';
 import { JobRegistry } from '@main/jobs/job-registry';
+import { getPdfPageCount } from '@main/pdf/extract';
 import { PaperLibrary } from '@main/storage/library-service';
 import {
   BABELDOC_DUAL_NAME,
@@ -34,6 +35,21 @@ import type {
   TranslationProgressEvent,
 } from '@shared/types';
 import { generateFixtures, SAMPLE_SCANNED_PDF, SAMPLE_TEXT_PDF } from '../fixtures/generate';
+
+// The cancellation test needs deterministic control over the asynchronous
+// page-count validation. The mock forwards to the real implementation by
+// default so every other test still parses fixture PDFs normally.
+const pdfExtractActual = vi.hoisted(() => ({
+  getPdfPageCount: null as null | ((filePath: string) => Promise<number>),
+}));
+
+vi.mock('@main/pdf/extract', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@main/pdf/extract')>();
+  pdfExtractActual.getPdfPageCount = actual.getPdfPageCount;
+  return { ...actual, getPdfPageCount: vi.fn(actual.getPdfPageCount) };
+});
+
+const mockedGetPdfPageCount = vi.mocked(getPdfPageCount);
 
 const MISSING_ENGINE = '未检测到 BabelDOC，请在设置中安装或指定路径';
 const NOT_CONFIGURED = '请先在设置中配置 AI 接口';
@@ -196,6 +212,8 @@ beforeEach(() => {
   jobs = new JobRegistry();
   library = new PaperLibrary({ db, jobs, getRoot: () => root });
   events = [];
+  mockedGetPdfPageCount.mockReset();
+  mockedGetPdfPageCount.mockImplementation(pdfExtractActual.getPdfPageCount!);
 });
 
 afterEach(() => {
@@ -586,5 +604,144 @@ describe('PaperTranslationService shutdown', () => {
     const service = makeService();
     await expect(service.shutdown()).resolves.toBeUndefined();
     expect(jobs.getState().toolTask).toBeNull();
+  });
+});
+
+describe('PaperTranslationService cancellation checkpoints', () => {
+  /**
+   * Binds an old mono translation manually so cancellation must leave both the
+   * DB path and the file bytes exactly as they were.
+   */
+  function bindOldMono(paper: Paper, marker: string): { monoPath: string; oldBytes: Buffer } {
+    const monoPath = storageFile(root, paper.storageDir!, BABELDOC_MONO_NAME);
+    writeFileSync(monoPath, Buffer.from(`%PDF-1.4\n${marker}`));
+    updatePaper(db, paper.id, { filePathTranslated: monoPath, pageCountTranslated: 2 });
+    return { monoPath, oldBytes: readFileSync(monoPath) };
+  }
+
+  function expectNoBindingLeftovers(storageDir: string): void {
+    const leftovers = readdirSync(join(root, storageDir)).filter(
+      (name) => name.includes('.new-') || name.includes('.bak-'),
+    );
+    expect(leftovers).toEqual([]);
+  }
+
+  it('输出校验期间取消会保留旧译本并走取消路径', async () => {
+    const { paper } = await library.importPaper(SAMPLE_TEXT_PDF);
+    const storageDir = paper.storageDir!;
+    const { monoPath, oldBytes } = bindOldMono(paper, 'OLD MONO DURING VALIDATION');
+
+    const armed = deferred<void>();
+    const validation = deferred<number>();
+    const runner = makeFakeRunner(async (options) => {
+      await armed.promise;
+      await writeOutputs(options, { mono: 'original.zh-CN.mono.pdf' });
+      return ok();
+    });
+    const service = makeService({}, runner);
+
+    const started = await service.start(paper.id);
+    mockedGetPdfPageCount.mockImplementationOnce(() => validation.promise);
+    armed.resolve();
+    await vi.waitFor(() => {
+      expect(mockedGetPdfPageCount).toHaveBeenCalledTimes(1);
+    });
+
+    expect(service.cancel(started.jobId)).toBe(true);
+    validation.resolve(2);
+    await service.waitForIdle();
+
+    expect(getPaper(db, paper.id)!.filePathTranslated).toBe(monoPath);
+    expect(readFileSync(monoPath).equals(oldBytes)).toBe(true);
+    expect(eventsOf('translation:canceled')).toHaveLength(1);
+    expect(eventsOf('translation:done')).toHaveLength(0);
+    expectNoBindingLeftovers(storageDir);
+    expect(readdirSync(tempRoot)).toEqual([]);
+    expect(jobs.getState().toolTask).toBeNull();
+  });
+
+  it('输出校验期间 shutdown 不会提交绑定', async () => {
+    const { paper } = await library.importPaper(SAMPLE_TEXT_PDF);
+    const storageDir = paper.storageDir!;
+    const { monoPath, oldBytes } = bindOldMono(paper, 'OLD MONO DURING SHUTDOWN');
+
+    const armed = deferred<void>();
+    const validation = deferred<number>();
+    const runner = makeFakeRunner(async (options) => {
+      await armed.promise;
+      await writeOutputs(options, { mono: 'original.zh-CN.mono.pdf' });
+      return ok();
+    });
+    const service = makeService({}, runner);
+
+    await service.start(paper.id);
+    mockedGetPdfPageCount.mockImplementationOnce(() => validation.promise);
+    armed.resolve();
+    await vi.waitFor(() => {
+      expect(mockedGetPdfPageCount).toHaveBeenCalledTimes(1);
+    });
+
+    const shutdown = service.shutdown();
+    validation.resolve(2);
+    await shutdown;
+
+    expect(getPaper(db, paper.id)!.filePathTranslated).toBe(monoPath);
+    expect(readFileSync(monoPath).equals(oldBytes)).toBe(true);
+    expect(eventsOf('translation:canceled')).toHaveLength(1);
+    expect(eventsOf('translation:done')).toHaveLength(0);
+    expectNoBindingLeftovers(storageDir);
+    expect(jobs.getState().toolTask).toBeNull();
+  });
+
+  it('空闲前 getState 返回运行中的任务快照，空闲后返回 null', async () => {
+    const { paper } = await library.importPaper(SAMPLE_TEXT_PDF);
+    const gate = deferred<ToolRunResult>();
+    const service = makeService({}, makeFakeRunner(() => gate.promise));
+
+    const started = await service.start(paper.id);
+    try {
+      expect(service.getState()).toMatchObject({
+        jobId: started.jobId,
+        paperId: paper.id,
+        title: paper.title,
+        status: 'running',
+        percent: null,
+        line: '',
+        logs: [],
+        error: null,
+      });
+    } finally {
+      gate.resolve(ok({ canceled: true }));
+      await service.waitForIdle();
+    }
+    expect(service.getState()).toBeNull();
+  });
+
+  it('进度行中的 API Key 会从事件和任务日志中脱敏', async () => {
+    const { paper } = await library.importPaper(SAMPLE_TEXT_PDF);
+    const gate = deferred<ToolRunResult>();
+    const runner = makeFakeRunner((options) => {
+      // The real runner already redacts; also feed the raw secret so the
+      // service's own redaction is exercised.
+      options.onLine?.('request with sk-secret failed', null);
+      return gate.promise;
+    });
+    const service = makeService({}, runner);
+
+    await service.start(paper.id);
+    await vi.waitFor(() => {
+      expect(service.getState()?.logs.join('\n')).toContain('[REDACTED]');
+    });
+    const runningSnapshot = service.getState()!;
+    expect(runningSnapshot.line).toContain('[REDACTED]');
+    expect(runningSnapshot.line).not.toContain('sk-secret');
+
+    gate.resolve(ok({ canceled: true }));
+    await service.waitForIdle();
+
+    const progress = eventsOf<TranslationProgressEvent>('translation:progress');
+    expect(progress).toHaveLength(1);
+    expect(progress[0].line).toContain('[REDACTED]');
+    expect(JSON.stringify(events)).not.toContain('sk-secret');
   });
 });

@@ -49,7 +49,8 @@ const CHINESE_DETECTION_CHARS = 5000;
 const MAX_LOG_LINES = 20;
 const SHUTDOWN_TIMEOUT_MS = 5000;
 const INVALID_MANAGED_PATH_MESSAGE = '文献文件夹路径异常，请重新定位或导入';
-const BINDING_FAILED_PREFIX = '绑定译本失败：';
+const BINDING_FAILED_MESSAGE = '绑定译本失败，请查看日志';
+const BINDING_FAILED_DETAIL_PREFIX = '绑定译本失败：';
 const TIMED_OUT_MESSAGE = '翻译超时，请稍后重试';
 const GENERIC_FAILURE_MESSAGE = '翻译失败，请查看日志';
 const AUTH_FAILURE_MESSAGE = 'AI 接口认证失败，请检查 API Key';
@@ -380,7 +381,11 @@ export class PaperTranslationService {
     } catch {
       // Best effort.
     }
-    this.deps.jobs.releaseTranslation(active?.info.jobId ?? '');
+    try {
+      this.deps.jobs.releaseTranslation(active?.info.jobId ?? '');
+    } catch {
+      // The renderer/window may already be gone during application shutdown.
+    }
   }
 
   private async awaitWithTimeout(promise: Promise<void>, timeoutMs: number): Promise<void> {
@@ -482,14 +487,27 @@ export class PaperTranslationService {
       if (dualPath !== null) {
         await validatePdfOutput(dualPath);
       }
+      // Validation is asynchronous: a cancel that arrived while page counts
+      // were read must win before any file is copied or backed up.
+      if (active.cancelRequested) {
+        this.finishCanceled(info);
+        return;
+      }
 
       const updated = await this.bindOutput(
         paper,
-        info.jobId,
+        info,
+        ai.apiKey,
         monoPath,
         dualPath,
         pageCountTranslated,
+        () => active.cancelRequested,
       );
+      if (updated === null) {
+        // bindOutput rolled back every created file and restored backups.
+        this.finishCanceled(info);
+        return;
+      }
       info.status = 'done';
       info.percent = 100;
       info.line = '翻译完成';
@@ -511,10 +529,17 @@ export class PaperTranslationService {
         } satisfies TranslationFailedEvent);
       }
     } finally {
-      // Idempotent and job-scoped: a late release can never clear a newer job.
-      this.deps.jobs.releaseTranslation(info.jobId);
+      // Cleanup order matters: the temp directory is removed even when the
+      // lease release (which notifies the renderer) fails, and no cleanup step
+      // may turn this job into an unhandled rejection.
       if (tempDir !== null) {
         await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
+      }
+      try {
+        // Idempotent and job-scoped: a late release can never clear a newer job.
+        this.deps.jobs.releaseTranslation(info.jobId);
+      } catch {
+        // The renderer/window may already be gone; the job itself is finished.
       }
       if (this.active === active) {
         active.tempDir = null;
@@ -563,21 +588,27 @@ export class PaperTranslationService {
   /**
    * Copies the outputs into job-specific files next to the finals, backs up
    * any previous bound files, renames the new files into place, and updates the
-   * DB row directly. Any failure restores the previous state exactly.
+   * DB row directly. Cancellation is re-checked before every destructive step;
+   * a canceled bind removes new files, restores backups, and returns null
+   * without touching the existing binding. Any other failure restores the
+   * previous state exactly and reports a fixed Chinese message.
    */
   private async bindOutput(
     paper: Paper,
-    jobId: string,
+    info: TranslationJobInfo,
+    apiKey: string,
     monoPath: string,
     dualPath: string | null,
     pageCountTranslated: number,
-  ): Promise<Paper> {
+    shouldCancel: () => boolean,
+  ): Promise<Paper | null> {
     if (paper.storageDir === null) {
       throw new Error(INVALID_MANAGED_PATH_MESSAGE);
     }
     const root = this.deps.getRoot();
     const finalMono = storageFile(root, paper.storageDir, BABELDOC_MONO_NAME);
     const finalDual = storageFile(root, paper.storageDir, BABELDOC_DUAL_NAME);
+    const jobId = info.jobId;
     const newMono = `${finalMono}.new-${jobId}`;
     const newDual = dualPath === null ? null : `${finalDual}.new-${jobId}`;
     const backupMono = `${finalMono}.bak-${jobId}`;
@@ -588,10 +619,33 @@ export class PaperTranslationService {
     let monoMoved = false;
     let dualMoved = false;
 
+    const rollback = async (): Promise<void> => {
+      if (monoMoved) {
+        await rm(finalMono, { force: true }).catch(() => undefined);
+      }
+      if (dualMoved) {
+        await rm(finalDual, { force: true }).catch(() => undefined);
+      }
+      if (monoBackedUp) {
+        await rename(backupMono, finalMono).catch(() => undefined);
+      }
+      if (dualBackedUp) {
+        await rename(backupDual, finalDual).catch(() => undefined);
+      }
+      await rm(newMono, { force: true }).catch(() => undefined);
+      if (newDual !== null) {
+        await rm(newDual, { force: true }).catch(() => undefined);
+      }
+    };
+
     try {
       await copyFile(monoPath, newMono);
       if (dualPath !== null && newDual !== null) {
         await copyFile(dualPath, newDual);
+      }
+      if (shouldCancel()) {
+        await rollback();
+        return null;
       }
 
       if (existsSync(finalMono)) {
@@ -603,12 +657,22 @@ export class PaperTranslationService {
         await rename(finalDual, backupDual);
         dualBackedUp = true;
       }
+      if (shouldCancel()) {
+        await rollback();
+        return null;
+      }
 
       await rename(newMono, finalMono);
       monoMoved = true;
       if (newDual !== null) {
         await rename(newDual, finalDual);
         dualMoved = true;
+      }
+      // The DB update is synchronous; checking immediately before it (with no
+      // await in between) closes the last window for a cancel to slip in.
+      if (shouldCancel()) {
+        await rollback();
+        return null;
       }
 
       const current = getPaper(this.deps.db, paper.id) ?? paper;
@@ -629,25 +693,14 @@ export class PaperTranslationService {
       }
       return updated;
     } catch (error) {
-      // Roll back: remove whatever new file reached its final name and put
-      // every backup back so the old translation survives unchanged.
-      if (monoMoved) {
-        await rm(finalMono, { force: true }).catch(() => undefined);
-      }
-      if (dualMoved) {
-        await rm(finalDual, { force: true }).catch(() => undefined);
-      }
-      if (monoBackedUp) {
-        await rename(backupMono, finalMono).catch(() => undefined);
-      }
-      if (dualBackedUp) {
-        await rename(backupDual, finalDual).catch(() => undefined);
-      }
-      await rm(newMono, { force: true }).catch(() => undefined);
-      if (newDual !== null) {
-        await rm(newDual, { force: true }).catch(() => undefined);
-      }
-      throw new Error(`${BINDING_FAILED_PREFIX}${errorMessage(error)}`);
+      await rollback();
+      // The raw filesystem detail stays in the (redacted) log where it can be
+      // inspected; the user-facing card only sees a fixed Chinese message.
+      info.logs = [
+        ...info.logs,
+        redactSecrets(`${BINDING_FAILED_DETAIL_PREFIX}${errorMessage(error)}`, [apiKey]),
+      ].slice(-MAX_LOG_LINES);
+      throw new Error(BINDING_FAILED_MESSAGE);
     }
   }
 }
