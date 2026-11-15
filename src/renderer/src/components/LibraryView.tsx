@@ -1,6 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { Paper } from '@shared/types';
+import { TRANSLATION_ENGINE_MISSING } from '@shared/translation';
 import { formatPaperMeta, formatTimestamp, parseTags } from '../lib/format';
+import { stripIpcErrorPrefix } from '../lib/errors';
 import {
   collectTags,
   filterAndSortPapers,
@@ -14,6 +16,7 @@ import { useFoldersStore } from '../stores/folders';
 import { useLibraryStore } from '../stores/library';
 import { useNotesStore } from '../stores/notes';
 import { useStorageStore } from '../stores/storage';
+import { useTranslationStore } from '../stores/translation';
 import { LibraryFolders } from './LibraryFolders';
 import { MovePaperDialog } from './MovePaperDialog';
 
@@ -23,6 +26,8 @@ interface LibraryViewProps {
   activePaperId: number | null;
   /** Wired by the settings work; hidden while no handler is supplied. */
   onOpenSettings?(): void;
+  /** Opens the settings dialog on the engine tab after a missing-engine failure. */
+  onOpenEngineSettings?(): void;
 }
 
 type LayoutMode = 'grid' | 'list';
@@ -36,7 +41,7 @@ interface EditDraft {
 }
 
 function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : '操作失败';
+  return stripIpcErrorPrefix(error instanceof Error ? error.message : '操作失败');
 }
 
 /** Displays the final path segment without pulling Node's `path` into the renderer. */
@@ -62,6 +67,7 @@ export function LibraryView({
   onContinueReading,
   activePaperId,
   onOpenSettings,
+  onOpenEngineSettings,
 }: LibraryViewProps): React.JSX.Element {
   const papers = useLibraryStore((state) => state.papers);
   const loading = useLibraryStore((state) => state.loading);
@@ -86,11 +92,20 @@ export function LibraryView({
   const dismissFolderSummary = useStorageStore((state) => state.dismissFolderSummary);
   const dismissStorageError = useStorageStore((state) => state.dismissError);
   const dismissMigrationNotice = useStorageStore((state) => state.dismissMigrationNotice);
+  const startTranslation = useTranslationStore((state) => state.start);
+  const translationJob = useTranslationStore((state) => state.job);
   const folders = useFoldersStore((state) => state.folders);
   // A renderer action failure is newer than the last main-process snapshot.
   const storageBannerError = storageError ?? storageInfo?.error ?? null;
-  // Any file-changing task or external tool process disables the mutating actions.
-  const storageBusy = busy.storageTask !== null || busy.toolTask !== null;
+  // Whole-paper translation already holds a storage marker, so the library
+  // stays disabled for it; install/warmup only own a tool job and must not.
+  const storageBusy = busy.storageTask !== null;
+  // The translation store survives a renderer reload, so it is the reliable
+  // source for which paper is translating right now.
+  const translatingPaperId =
+    translationJob !== null && translationJob.status === 'running'
+      ? translationJob.paperId
+      : null;
 
   const [queryText, setQueryText] = useState('');
   const [activeTag, setActiveTag] = useState<string | null>(null);
@@ -229,6 +244,30 @@ export function LibraryView({
     setOpenMenuId(null);
     // Any paper can be summarized; the notes panel owns generation errors.
     void generateNote('summary', { paperId: paper.id });
+  };
+
+  const handleTranslate = (paper: Paper): void => {
+    setOpenMenuId(null);
+    setNotice(null);
+    setImportError(null);
+    if (
+      isTranslatedBound(paper) &&
+      !window.confirm('该文献已有译本，重新翻译会覆盖当前绑定的译本，确定继续吗？')
+    ) {
+      return;
+    }
+    void (async () => {
+      setError(null);
+      try {
+        await startTranslation(paper.id);
+      } catch (failure) {
+        const message = errorMessage(failure);
+        setError(message);
+        if (message === TRANSLATION_ENGINE_MISSING) {
+          onOpenEngineSettings?.();
+        }
+      }
+    })();
   };
 
   const handleAttach = (paper: Paper): void => {
@@ -713,6 +752,18 @@ export function LibraryView({
                           onClick={() => handleGenerateSummary(paper)}
                         >
                           {notesGenerating === 'summary' ? '生成中…' : '生成结构化总结'}
+                        </button>
+                        <button
+                          type="button"
+                          className="menu-button"
+                          disabled={translatingPaperId === paper.id}
+                          onClick={() => handleTranslate(paper)}
+                        >
+                          {translatingPaperId === paper.id
+                            ? '翻译中…'
+                            : translated
+                              ? '重新翻译'
+                              : '翻译为中文（保留排版）'}
                         </button>
                         <button
                           type="button"

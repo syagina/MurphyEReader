@@ -25,7 +25,13 @@ import type {
   StorageInfo,
   ToolDoneEvent,
   ToolProgressEvent,
+  TranslationCanceledEvent,
+  TranslationDoneEvent,
   TranslationEngineStatus,
+  TranslationFailedEvent,
+  TranslationJobInfo,
+  TranslationProgressEvent,
+  TranslationStartResult,
 } from './types';
 
 export interface PaperLensApi {
@@ -79,8 +85,17 @@ export interface PaperLensApi {
     install(): Promise<EngineActionResult>;
     warmup(): Promise<EngineActionResult>;
     cancel(jobId: string): Promise<void>;
+    /** Starts a preserved-layout translation of one whole paper. */
+    start(paperId: number): Promise<TranslationStartResult>;
+    /** The running whole-paper job, or null when none is running. */
+    getState(): Promise<TranslationJobInfo | null>;
+    onProgress(cb: (event: TranslationProgressEvent) => void): () => void;
+    onDone(cb: (event: TranslationDoneEvent) => void): () => void;
+    onFailed(cb: (event: TranslationFailedEvent) => void): () => void;
+    onCanceled(cb: (event: TranslationCanceledEvent) => void): () => void;
     onToolProgress(cb: (event: ToolProgressEvent) => void): () => void;
     onToolDone(cb: (event: ToolDoneEvent) => void): () => void;
+    onState(cb: (state: JobState) => void): () => void;
   };
   notes: {
     list(paperId?: number): Promise<Note[]>;

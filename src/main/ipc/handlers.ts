@@ -17,6 +17,7 @@ import type {
 } from '@shared/types';
 import { abortChat, startChat } from '../ai/chat-service';
 import { AiClient } from '../ai/client';
+import type { AiConfig } from '../ai/client';
 import { generateNote } from '../ai/note-service';
 import { translateSelection } from '../ai/translation-service';
 import {
@@ -44,6 +45,7 @@ import { changeLibraryRoot } from '../storage/root-change';
 import { readStorageInfo } from '../storage/storage-info';
 import { BabeldocService } from '../tools/babeldoc-service';
 import { ToolJobRunner } from '../tools/job-runner';
+import { PaperTranslationService } from '../translation/paper-translation';
 
 export interface HandlerDeps {
   db: Database.Database;
@@ -139,6 +141,8 @@ export function registerIpcHandlers(deps: HandlerDeps): {
   runner: ToolJobRunner;
   babeldoc: BabeldocService;
   startStorageMigration(): Promise<void>;
+  hasActiveToolJob(): boolean;
+  shutdown(): Promise<void>;
 } {
   const { db, secret, emit } = deps;
   const jobs = new JobRegistry((state) => {
@@ -255,6 +259,38 @@ export function registerIpcHandlers(deps: HandlerDeps): {
       getApiKey(db, secret) !== ''
     );
   };
+
+  // Whole-paper translation needs the decrypted key for its private TOML; a
+  // partially configured provider counts as unconfigured.
+  const readAiConfig = (): AiConfig | null => {
+    const settings = getSettings(db, secret);
+    const apiKey = getApiKey(db, secret);
+    if (
+      settings.baseUrl.trim() === '' ||
+      settings.chatModel.trim() === '' ||
+      apiKey === ''
+    ) {
+      return null;
+    }
+    return {
+      baseUrl: settings.baseUrl,
+      apiKey,
+      chatModel: settings.chatModel,
+      visionModel: settings.visionModel,
+      temperature: settings.temperature,
+    };
+  };
+
+  const paperTranslation = new PaperTranslationService({
+    db,
+    jobs,
+    runner,
+    library,
+    getRoot: libraryRoot,
+    getEnginePath: () => babeldoc.detect(),
+    getAiConfig: readAiConfig,
+    emit,
+  });
 
   electron.ipcMain.handle('papers:list', () => listPapers(db));
 
@@ -413,8 +449,17 @@ export function registerIpcHandlers(deps: HandlerDeps): {
 
   // Task 13 routes a matching jobId to the paper-translation job first.
   electron.ipcMain.handle('translation:cancel', (_event, jobId: string) => {
+    if (paperTranslation.cancel(jobId)) {
+      return;
+    }
     babeldoc.cancel(jobId);
   });
+
+  electron.ipcMain.handle('translation:start', (_event, paperId: number) =>
+    paperTranslation.start(paperId),
+  );
+
+  electron.ipcMain.handle('translation:getState', () => paperTranslation.getState());
 
   electron.ipcMain.handle('notes:list', (_event, paperId?: number) => listNotes(db, paperId));
 
@@ -659,6 +704,16 @@ export function registerIpcHandlers(deps: HandlerDeps): {
       } catch {
         // Recorded in lastStorageError and surfaced through storage:getInfo.
       }
+    },
+    hasActiveToolJob(): boolean {
+      return (
+        paperTranslation.getState() !== null ||
+        jobs.getState().toolTask !== null ||
+        runner.activeJobIds().length > 0
+      );
+    },
+    shutdown(): Promise<void> {
+      return paperTranslation.shutdown();
     },
   };
 }

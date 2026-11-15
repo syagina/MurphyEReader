@@ -7,6 +7,9 @@ import { createSafeStorageSecretStore } from './settings/secret-store';
 
 let mainWindow: BrowserWindow | null = null;
 let db: Database.Database | null = null;
+// The first quit request with a live external tool job is deferred until the
+// shutdown hook has canceled it and cleaned up; the second one goes through.
+let shuttingDown = false;
 
 function createWindow(): void {
   const win = new BrowserWindow({
@@ -45,7 +48,7 @@ app.whenReady().then(() => {
   db = database;
   const secret = createSafeStorageSecretStore();
 
-  const { startStorageMigration } = registerIpcHandlers({
+  const { startStorageMigration, hasActiveToolJob, shutdown } = registerIpcHandlers({
     db: database,
     secret,
     documentsDir: app.getPath('documents'),
@@ -63,6 +66,20 @@ app.whenReady().then(() => {
   // One background pass adopts legacy papers; failures are recorded by the
   // handler and shown in the library, so the window opens regardless.
   void startStorageMigration();
+
+  app.on('before-quit', (event) => {
+    if (shuttingDown) {
+      return;
+    }
+    if (!hasActiveToolJob()) {
+      return;
+    }
+    event.preventDefault();
+    shuttingDown = true;
+    void shutdown().finally(() => {
+      app.quit();
+    });
+  });
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) {

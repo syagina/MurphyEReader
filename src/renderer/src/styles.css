@@ -3448,3 +3448,114 @@ body.export-body .export-document .markdown-list {
     widows: 3;
   }
 }
+
+/* Whole-paper translation status (fixed over both library and reader) */
+.translation-status-card {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 45;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(360px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  box-shadow: 0 8px 24px rgb(16 24 40 / 0.22);
+  font-size: 13px;
+}
+
+.translation-status-head {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.translation-status-title {
+  overflow: hidden;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.translation-status-state {
+  flex: 0 0 auto;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.translation-status-state.done {
+  color: var(--accent);
+}
+
+.translation-status-state.failed {
+  color: var(--danger);
+}
+
+.translation-status-progress {
+  height: 4px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--bg-hover);
+}
+
+.translation-status-progress span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.translation-status-progress.indeterminate span {
+  width: 40%;
+  animation: translation-status-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes translation-status-slide {
+  from {
+    margin-left: -40%;
+  }
+
+  to {
+    margin-left: 100%;
+  }
+}
+
+.translation-status-line {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  line-height: 1.5;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.translation-status-percent {
+  margin-right: 6px;
+  color: var(--text);
+  font-variant-numeric: tabular-nums;
+}
+
+.translation-status-logs {
+  max-height: 140px;
+  margin: 0;
+  padding: 6px 8px;
+  overflow-y: auto;
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.translation-status-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}

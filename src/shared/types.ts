@@ -310,3 +310,45 @@ export interface ToolJobRunnerOptions {
   killTree?: (pid: number) => Promise<void> | void;
   throttleMs?: number;
 }
+
+/** Returned immediately after a whole-paper translation is accepted. */
+export interface TranslationStartResult {
+  jobId: string;
+  paperId: number;
+  title: string;
+}
+
+/** Snapshot of the whole-paper translation job; only returned while running. */
+export interface TranslationJobInfo {
+  jobId: string;
+  paperId: number;
+  title: string;
+  status: 'running' | 'done' | 'failed' | 'canceled';
+  percent: number | null;
+  line: string;
+  logs: string[];
+  error: string | null;
+}
+
+export interface TranslationProgressEvent {
+  jobId: string;
+  paperId: number;
+  percent: number | null;
+  line: string;
+}
+
+export interface TranslationDoneEvent {
+  jobId: string;
+  paper: Paper;
+}
+
+export interface TranslationFailedEvent {
+  jobId: string;
+  paperId: number;
+  message: string;
+}
+
+export interface TranslationCanceledEvent {
+  jobId: string;
+  paperId: number;
+}

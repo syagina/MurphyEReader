@@ -8,6 +8,7 @@ import { PdfViewer } from './components/PdfViewer';
 import { SearchPanel } from './components/SearchPanel';
 import { SettingsDialog } from './components/SettingsDialog';
 import type { SettingsTab } from './components/SettingsDialog';
+import { TranslationStatusCard } from './components/TranslationStatusCard';
 import { errorMessage } from './lib/errors';
 import { useChatStore } from './stores/chat';
 import { useLibraryStore } from './stores/library';
@@ -17,6 +18,7 @@ import type { ReaderSelection } from './stores/reader';
 import { useSearchStore } from './stores/search';
 import { useSettingsStore } from './stores/settings';
 import { useStorageStore } from './stores/storage';
+import { useTranslationStore } from './stores/translation';
 
 type AiTab = 'chat' | 'notes';
 
@@ -93,6 +95,12 @@ export default function App(): React.JSX.Element {
   // store keeps a single subscription and the cleanup re-arms it.
   useEffect(() => {
     return useStorageStore.getState().init();
+  }, []);
+
+  // Whole-paper translation progress is app-global: one job at a time, shown
+  // as the fixed status card on both the library and reader views.
+  useEffect(() => {
+    return useTranslationStore.getState().init();
   }, []);
 
   // A pending concept card belongs to the paper it was started from, and so
@@ -381,6 +389,11 @@ export default function App(): React.JSX.Element {
 
   const showLibrary = libraryView || openedPaper === null;
 
+  const openEngineSettings = (): void => {
+    setSettingsTab('engine');
+    setSettingsOpen(true);
+  };
+
   return (
     <div className={focusMode && !showLibrary ? 'app-frame reader-focus' : 'app-frame'}>
       <header className="app-topbar">
@@ -459,6 +472,7 @@ export default function App(): React.JSX.Element {
             setSettingsTab('library');
             setSettingsOpen(true);
           }}
+          onOpenEngineSettings={openEngineSettings}
         />
       ) : openedPaper === null ? null : (
         <div className="app-shell">
@@ -494,6 +508,7 @@ export default function App(): React.JSX.Element {
                 onSaveNote={handleSaveNote}
                 onCaptureAsk={handleCaptureAsk}
                 onOpenSettings={() => setSettingsOpen(true)}
+                onOpenEngineSettings={openEngineSettings}
               />
             </div>
           </main>
@@ -595,6 +610,8 @@ export default function App(): React.JSX.Element {
           </aside>
         </div>
       )}
+
+      <TranslationStatusCard onOpenPaper={handleOpenPaper} />
 
       {settingsOpen && (
         <SettingsDialog

@@ -3,6 +3,7 @@ import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { Paper } from '@shared/types';
 import {
+  TRANSLATION_ENGINE_MISSING,
   TRANSLATION_NOT_CONFIGURED,
   TRANSLATION_TARGET_LABELS,
   detectTranslationTarget,
@@ -13,7 +14,7 @@ import {
   findInDocument,
   getSelectionInPage,
 } from '../lib/pdf';
-import { errorMessage } from '../lib/errors';
+import { errorMessage, stripIpcErrorPrefix } from '../lib/errors';
 import { cropToDataUrl, toSourceRect } from '../lib/screenshot';
 import type { Rect } from '../lib/screenshot';
 import { normalizeTranslationError } from '../lib/translation-error';
@@ -22,6 +23,7 @@ import { useReaderStore } from '../stores/reader';
 import type { ReaderSelection } from '../stores/reader';
 import { useLibraryStore } from '../stores/library';
 import { useSettingsStore } from '../stores/settings';
+import { useTranslationStore } from '../stores/translation';
 import { PdfPage } from './PdfPage';
 import { RegionCapture } from './RegionCapture';
 import { SelectionTranslationCard } from './SelectionTranslationCard';
@@ -36,6 +38,8 @@ export interface PdfViewerProps {
   onCaptureAsk?(imageDataUrl: string): void;
   /** Opens the settings dialog from the translation card's unconfigured hint. */
   onOpenSettings?(): void;
+  /** Opens the translation-engine tab when whole-paper translation cannot start. */
+  onOpenEngineSettings?(): void;
 }
 
 interface PageSize {
@@ -78,6 +82,7 @@ export function PdfViewer({
   onSaveNote,
   onCaptureAsk,
   onOpenSettings,
+  onOpenEngineSettings,
 }: PdfViewerProps): React.JSX.Element {
   const paperId = useReaderStore((state) => state.paperId);
   const version = useReaderStore((state) => state.version);
@@ -100,6 +105,12 @@ export function PdfViewer({
     paper.filePathTranslated !== null &&
     paper.filePathTranslated !== '' &&
     paper.pageCountTranslated !== null;
+  const translationJob = useTranslationStore((state) => state.job);
+  const startPaperTranslation = useTranslationStore((state) => state.start);
+  const paperTranslating =
+    translationJob !== null &&
+    translationJob.status === 'running' &&
+    translationJob.paperId === paper.id;
 
   const [pdf, setPdf] = useState<PDFDocumentProxy | null>(null);
   const [pageSizes, setPageSizes] = useState<PageSize[]>([]);
@@ -107,6 +118,7 @@ export function PdfViewer({
   const [reloadToken, setReloadToken] = useState(0);
   const [relocating, setRelocating] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [translationStartError, setTranslationStartError] = useState<string | null>(null);
 
   const [searchQuery, setSearchQuery] = useState('');
   const [matches, setMatches] = useState<number[] | null>(null);
@@ -193,6 +205,7 @@ export function PdfViewer({
     setToolbarPosition(null);
     setCapturing(false);
     setCaptureError(null);
+    setTranslationStartError(null);
     closeTranslation();
     searchSeqRef.current += 1;
     lastMarkedRef.current = null;
@@ -640,6 +653,20 @@ export function PdfViewer({
     startTranslation(selection.text, position.top, position.left);
   };
 
+  const handleStartPaperTranslation = async (): Promise<void> => {
+    setTranslationStartError(null);
+    try {
+      await startPaperTranslation(paper.id);
+    } catch (error) {
+      const message = stripIpcErrorPrefix(errorMessage(error));
+      if (message === TRANSLATION_ENGINE_MISSING && onOpenEngineSettings !== undefined) {
+        onOpenEngineSettings();
+        return;
+      }
+      setTranslationStartError(message);
+    }
+  };
+
   const handleRelocate = async (): Promise<void> => {
     setRelocating(true);
     try {
@@ -819,6 +846,19 @@ export function PdfViewer({
           >
             选框提问
           </button>
+          {!translationBound && (
+            <button
+              type="button"
+              className="pdf-toolbar-button"
+              title="用 BabelDOC 生成保留排版的整篇中文译本"
+              disabled={paperTranslating}
+              onClick={() => {
+                void handleStartPaperTranslation();
+              }}
+            >
+              {paperTranslating ? '翻译中…' : '生成中文译本'}
+            </button>
+          )}
           <button
             type="button"
             className="pdf-toolbar-button"
@@ -873,6 +913,19 @@ export function PdfViewer({
         <div className="viewer-capture-error" role="alert">
           <span>{captureError}</span>
           <button type="button" className="menu-button" onClick={() => setCaptureError(null)}>
+            关闭
+          </button>
+        </div>
+      )}
+
+      {translationStartError !== null && (
+        <div className="viewer-capture-error" role="alert">
+          <span>{translationStartError}</span>
+          <button
+            type="button"
+            className="menu-button"
+            onClick={() => setTranslationStartError(null)}
+          >
             关闭
           </button>
         </div>

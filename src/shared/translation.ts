@@ -10,6 +10,14 @@ export const TRANSLATION_NOT_CONFIGURED = '请先在设置中配置 AI 接口';
 export const TRANSLATION_EMPTY_RESULT = '翻译结果为空，请重试';
 export const TRANSLATION_FAILED = '翻译失败，请稍后重试';
 
+/** Exact user-facing messages of whole-paper BabelDOC translation. */
+export const TRANSLATION_ENGINE_MISSING = '未检测到 BabelDOC，请在设置中安装或指定路径';
+export const TRANSLATION_ALREADY_CHINESE = '这篇看起来已是中文文献';
+export const TRANSLATION_ORIGINAL_MISSING = '原文文件不存在';
+export const TRANSLATION_OUTPUT_MISSING = '未找到翻译输出';
+export const TRANSLATION_OUTPUT_AMBIGUOUS = '翻译输出不唯一';
+export const TRANSLATION_OUTPUT_INVALID = '翻译输出文件无效';
+
 /** Human-readable names used in prompts and the translation card. */
 export const TRANSLATION_TARGET_LABELS: Record<TranslationTarget, string> = {
   'zh-CN': '简体中文',

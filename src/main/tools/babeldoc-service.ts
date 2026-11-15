@@ -10,6 +10,7 @@ import type {
   ToolTask,
   TranslationEngineStatus,
 } from '@shared/types';
+import { TRANSLATION_ENGINE_MISSING } from '@shared/translation';
 import type { JobRegistry } from '../jobs/job-registry';
 import type { StoredAppSettings } from '../settings/app-settings';
 import type { ToolJobRunner } from './job-runner';
@@ -17,7 +18,7 @@ import { babeldocCandidates, buildCommandInvocation, uvCandidates } from './babe
 
 const PROBE_TIMEOUT_MS = 10_000;
 const INVALID_ENGINE_MESSAGE = '无法运行该翻译引擎，请重新选择';
-const MISSING_ENGINE_MESSAGE = '未检测到 BabelDOC，请在设置中安装或指定路径';
+const MISSING_ENGINE_MESSAGE = TRANSLATION_ENGINE_MISSING;
 const CANCELED_MESSAGE = '已取消';
 const TIMED_OUT_MESSAGE = '操作超时';
 
