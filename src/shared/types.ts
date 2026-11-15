@@ -93,6 +93,19 @@ export interface AiSettingsInput {
   apiKey?: string;
 }
 
+export interface AppSettings {
+  libraryRoot: string;
+  defaultLibraryRoot: string;
+  babeldocPath: string;
+  babeldocDetectedPath: string | null;
+  aiPanelWidth: number;
+}
+
+export interface AppSettingsUpdate {
+  babeldocPath?: string | null;
+  aiPanelWidth?: number;
+}
+
 export interface ChatSendRequest {
   paperId: number;
   conversationId: number;
