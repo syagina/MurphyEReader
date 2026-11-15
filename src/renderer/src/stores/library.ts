@@ -1,13 +1,12 @@
 import { create } from 'zustand';
-import type { PaperLensApi } from '@shared/ipc';
-import type { ImportPaperResult, Paper } from '@shared/types';
+import type { ImportPaperResult, Paper, PaperUpdatePatch } from '@shared/types';
+
+export type { PaperUpdatePatch };
 
 export interface FileStatus {
   originalExists: boolean;
   translatedExists: boolean;
 }
-
-export type PaperUpdatePatch = Parameters<PaperLensApi['papers']['update']>[1];
 
 export interface LibraryState {
   papers: Paper[];

@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   ChatSendRequest,
   Conversation,
+  Folder,
   FolderImportSummary,
   ImportPaperResult,
   ImportProgressEvent,
@@ -14,6 +15,7 @@ import type {
   Note,
   NoteType,
   Paper,
+  PaperUpdatePatch,
   PdfExportJob,
   RootChangeResult,
   SearchResult,
@@ -26,16 +28,17 @@ export interface PaperLensApi {
     get(id: number): Promise<Paper | null>;
     importOriginal(): Promise<ImportPaperResult | null>;
     attachTranslated(id: number): Promise<Paper | null>;
-    update(
-      id: number,
-      patch: Partial<
-        Pick<Paper, 'title' | 'authors' | 'year' | 'tags' | 'lastPageOriginal' | 'lastPageTranslated'>
-      >,
-    ): Promise<Paper>;
+    update(id: number, patch: PaperUpdatePatch): Promise<Paper>;
     remove(id: number): Promise<void>;
     markRead(id: number, version: 'original' | 'translated', pageNo: number): Promise<void>;
     checkFiles(): Promise<{ id: number; originalExists: boolean; translatedExists: boolean }[]>;
     relocate(id: number, version: 'original' | 'translated'): Promise<Paper | null>;
+  };
+  folders: {
+    list(): Promise<Folder[]>;
+    create(name: string): Promise<Folder>;
+    rename(id: number, name: string): Promise<Folder>;
+    remove(id: number): Promise<void>;
   };
   pdf: {
     load(

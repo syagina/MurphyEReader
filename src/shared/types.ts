@@ -34,6 +34,24 @@ export interface Paper {
   lastReadAt: number | null;
 }
 
+/** A single-level library folder; `null` folderId means 未分类. */
+export interface Folder {
+  id: number;
+  name: string;
+  createdAt: string;
+}
+
+/** Fields the renderer may change through `papers:update`. */
+export interface PaperUpdatePatch {
+  title?: string;
+  authors?: string;
+  year?: number | null;
+  tags?: string[];
+  lastPageOriginal?: number;
+  lastPageTranslated?: number;
+  folderId?: number | null;
+}
+
 /** Result of a single-file import; `duplicate` means no new row was added. */
 export interface ImportPaperResult {
   paper: Paper;

@@ -24,6 +24,12 @@ const api: PaperLensApi = {
     checkFiles: () => ipcRenderer.invoke('papers:checkFiles'),
     relocate: (id, version) => ipcRenderer.invoke('papers:relocate', id, version),
   },
+  folders: {
+    list: () => ipcRenderer.invoke('folders:list'),
+    create: (name) => ipcRenderer.invoke('folders:create', name),
+    rename: (id, name) => ipcRenderer.invoke('folders:rename', id, name),
+    remove: (id) => ipcRenderer.invoke('folders:remove', id),
+  },
   pdf: {
     load: (paperId, version) => ipcRenderer.invoke('pdf:load', paperId, version),
   },

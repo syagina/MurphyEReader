@@ -3,12 +3,21 @@ import type { FileStatus } from '../stores/library';
 
 export type LibrarySort = 'lastRead' | 'added' | 'title' | 'year';
 export type LibraryFilter = 'all' | 'translated' | 'missing' | 'unread';
+/** Folder facet selection; `none` is 未分类 and a number is a folder id. */
+export type FolderFilter = 'all' | 'none' | number;
 
 export interface LibraryQuery {
   text: string;
   tag: string | null;
   filter: LibraryFilter;
   sort: LibrarySort;
+  folderId: FolderFilter;
+}
+
+export interface FolderCounts {
+  all: number;
+  none: number;
+  byId: Record<number, number>;
 }
 
 export interface LibraryStats {
@@ -48,6 +57,34 @@ function matchesText(paper: Paper, query: string): boolean {
   );
 }
 
+function matchesFolder(paper: Paper, folderId: FolderFilter): boolean {
+  if (folderId === 'all') {
+    return true;
+  }
+  if (folderId === 'none') {
+    // Old rows/fixtures may lack the field entirely; treat them as 未分类.
+    return paper.folderId === null || paper.folderId === undefined;
+  }
+  return paper.folderId === folderId;
+}
+
+function matchesStatus(
+  paper: Paper,
+  status: FileStatus | undefined,
+  filter: LibraryFilter,
+): boolean {
+  switch (filter) {
+    case 'all':
+      return true;
+    case 'translated':
+      return isTranslatedBound(paper);
+    case 'missing':
+      return isPaperMissing(paper, status);
+    case 'unread':
+      return paper.lastReadAt === null;
+  }
+}
+
 function comparePapers(a: Paper, b: Paper, sort: LibrarySort): number {
   switch (sort) {
     case 'title':
@@ -68,8 +105,8 @@ function comparePapers(a: Paper, b: Paper, sort: LibrarySort): number {
 }
 
 /**
- * Applies the library search, tag and status filters, then sorts a copy. The
- * caller owns the original list; no Paper objects are mutated.
+ * Applies the library search, tag, status and folder filters, then sorts a
+ * copy. The caller owns the original list; no Paper objects are mutated.
  */
 export function filterAndSortPapers(
   papers: Paper[],
@@ -85,17 +122,10 @@ export function filterAndSortPapers(
       if (query.tag !== null && !paper.tags.includes(query.tag)) {
         return false;
       }
-      const status = statuses[paper.id];
-      switch (query.filter) {
-        case 'all':
-          return true;
-        case 'translated':
-          return isTranslatedBound(paper);
-        case 'missing':
-          return isPaperMissing(paper, status);
-        case 'unread':
-          return paper.lastReadAt === null;
+      if (!matchesStatus(paper, statuses[paper.id], query.filter)) {
+        return false;
       }
+      return matchesFolder(paper, query.folderId);
     })
     .sort((a, b) => comparePapers(a, b, query.sort));
 }
@@ -111,6 +141,19 @@ export function collectTags(papers: Paper[]): { tag: string; count: number }[] {
   return [...counts.entries()]
     .map(([tag, count]) => ({ tag, count }))
     .sort((a, b) => b.count - a.count || a.tag.localeCompare(b.tag, 'zh-CN'));
+}
+
+/** Counts all papers, unclassified papers (null/undefined), and per-folder totals. */
+export function countByFolder(papers: Paper[]): FolderCounts {
+  const counts: FolderCounts = { all: papers.length, none: 0, byId: {} };
+  for (const paper of papers) {
+    if (paper.folderId === null || paper.folderId === undefined) {
+      counts.none += 1;
+    } else {
+      counts.byId[paper.folderId] = (counts.byId[paper.folderId] ?? 0) + 1;
+    }
+  }
+  return counts;
 }
 
 export function libraryStats(

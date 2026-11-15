@@ -572,6 +572,11 @@ input:focus-visible {
   white-space: nowrap;
 }
 
+.library-import-folder-button {
+  width: auto;
+  white-space: nowrap;
+}
+
 .library-page-actions .secondary-button {
   padding: 8px 16px;
 }
@@ -814,6 +819,114 @@ input:focus-visible {
   line-height: 1.6;
 }
 
+/* Folder facet above the tag list. */
+.library-folders {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: 12px;
+}
+
+.library-folder-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.library-folder-row .library-tag-filter {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.library-folder-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-folder-actions {
+  position: absolute;
+  right: 5px;
+  display: none;
+  align-items: center;
+  gap: 2px;
+}
+
+.library-folder-row:hover .library-folder-actions,
+.library-folder-row:focus-within .library-folder-actions {
+  display: flex;
+}
+
+.library-folder-row:hover .library-tag-count,
+.library-folder-row:focus-within .library-tag-count {
+  visibility: hidden;
+}
+
+.library-folder-action {
+  padding: 1px 4px;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 10px;
+  cursor: pointer;
+}
+
+.library-folder-action:hover {
+  background: rgb(31 35 41 / 0.08);
+  color: var(--text);
+}
+
+.library-folder-action.danger:hover {
+  color: var(--danger);
+}
+
+.library-folder-input {
+  width: 100%;
+  padding: 5px 8px;
+  border: 1px solid var(--accent);
+  border-radius: 6px;
+  background: #ffffff;
+  color: var(--text);
+  font-size: 12px;
+}
+
+.library-folder-input:focus {
+  outline: 2px solid var(--accent-soft);
+}
+
+.library-folder-create {
+  width: 100%;
+  margin-top: 2px;
+  padding: 6px 8px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.library-folder-create:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.library-folder-create:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.library-folder-error {
+  margin: 3px 6px;
+  color: var(--danger);
+  font-size: 11px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
 .library-results {
   display: flex;
   flex: 1 1 auto;
@@ -976,6 +1089,12 @@ input:focus-visible {
 .library-badge.active {
   background: #e7f7ee;
   color: #147a4b;
+}
+
+.library-badge.folder {
+  max-width: 130px;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .card-menu-toggle {
@@ -1257,6 +1376,62 @@ input:focus-visible {
   word-break: break-word;
 }
 
+.library-move-dialog {
+  width: min(380px, 100%);
+}
+
+.library-move-paper {
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.library-move-options {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 240px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-subtle);
+}
+
+.library-move-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 8px;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.library-move-option:hover {
+  background: var(--bg-hover);
+}
+
+.library-move-option.selected {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.library-move-option input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.library-move-option span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 /* Reader focus/fullscreen mode hides chrome; the PDF toolbar stays reachable. */
 .app-frame.reader-focus .app-topbar {
   display: none;
@@ -1311,6 +1486,14 @@ input:focus-visible {
   }
 
   .library-tag-filter {
+    width: auto;
+  }
+
+  .library-folders {
+    flex: 1 0 100%;
+  }
+
+  .library-folder-row .library-tag-filter {
     width: auto;
   }
 

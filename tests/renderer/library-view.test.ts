@@ -3,6 +3,7 @@ import type { Paper } from '@shared/types';
 import type { FileStatus } from '@renderer/stores/library';
 import {
   collectTags,
+  countByFolder,
   filterAndSortPapers,
   isPaperMissing,
   libraryStats,
@@ -73,7 +74,13 @@ const papers = [
   }),
 ];
 
-const baseQuery = { text: '', tag: null, filter: 'all' as const, sort: 'added' as const };
+const baseQuery = {
+  text: '',
+  tag: null,
+  filter: 'all' as const,
+  sort: 'added' as const,
+  folderId: 'all' as const,
+};
 
 describe('filterAndSortPapers', () => {
   it('按最近添加排序', () => {
@@ -142,6 +149,58 @@ describe('filterAndSortPapers', () => {
         (paper) => paper.id,
       ),
     ).toEqual([2]);
+  });
+});
+
+describe('folder filtering and counts', () => {
+  const withFolders = [
+    makePaper({ id: 1, folderId: 1 }),
+    makePaper({ id: 2, folderId: null }),
+    makePaper({ id: 3, folderId: 2 }),
+  ];
+
+  it('按文件夹 id、未分类与全部过滤', () => {
+    expect(
+      filterAndSortPapers(withFolders, {}, { ...baseQuery, folderId: 1 }).map((p) => p.id),
+    ).toEqual([1]);
+    expect(
+      filterAndSortPapers(withFolders, {}, { ...baseQuery, folderId: 'none' }).map((p) => p.id),
+    ).toEqual([2]);
+    expect(filterAndSortPapers(withFolders, {}, { ...baseQuery, folderId: 'all' })).toHaveLength(3);
+  });
+
+  it('文件夹过滤在标签与状态过滤之后应用', () => {
+    const mixed = [
+      makePaper({ id: 1, folderId: 1, tags: ['fem'], lastReadAt: null }),
+      makePaper({ id: 2, folderId: 1, tags: ['fem'], lastReadAt: 10 }),
+      makePaper({ id: 3, folderId: 2, tags: ['fem'], lastReadAt: null }),
+      makePaper({ id: 4, folderId: 1, tags: ['优化'], lastReadAt: null }),
+    ];
+
+    expect(
+      filterAndSortPapers(mixed, {}, {
+        ...baseQuery,
+        folderId: 1,
+        tag: 'fem',
+        filter: 'unread',
+      }).map((paper) => paper.id),
+    ).toEqual([1]);
+  });
+
+  it('统计全部、未分类与各文件夹数量', () => {
+    expect(countByFolder(withFolders)).toEqual({ all: 3, none: 1, byId: { 1: 1, 2: 1 } });
+  });
+
+  it('旧数据缺少 folderId 时视为未分类', () => {
+    const legacy = [
+      makePaper({ id: 4, folderId: undefined, addedAt: 2000 }),
+      makePaper({ id: 5, folderId: null, addedAt: 1000 }),
+    ];
+
+    expect(
+      filterAndSortPapers(legacy, {}, { ...baseQuery, folderId: 'none' }).map((p) => p.id),
+    ).toEqual([4, 5]);
+    expect(countByFolder(legacy)).toEqual({ all: 2, none: 2, byId: {} });
   });
 });
 

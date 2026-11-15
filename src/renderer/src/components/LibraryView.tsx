@@ -9,10 +9,13 @@ import {
   libraryStats,
   readingProgress,
 } from '../lib/library-view';
-import type { LibraryFilter, LibrarySort } from '../lib/library-view';
+import type { FolderFilter, LibraryFilter, LibrarySort } from '../lib/library-view';
+import { useFoldersStore } from '../stores/folders';
 import { useLibraryStore } from '../stores/library';
 import { useNotesStore } from '../stores/notes';
 import { useStorageStore } from '../stores/storage';
+import { LibraryFolders } from './LibraryFolders';
+import { MovePaperDialog } from './MovePaperDialog';
 
 interface LibraryViewProps {
   onOpen(paper: Paper): void;
@@ -74,7 +77,7 @@ export function LibraryView({
   const storageInfo = useStorageStore((state) => state.info);
   const storageError = useStorageStore((state) => state.error);
   const lastMigration = useStorageStore((state) => state.lastMigration);
-  const storageTask = useStorageStore((state) => state.busy.storageTask);
+  const busy = useStorageStore((state) => state.busy);
   const revealPaper = useStorageStore((state) => state.revealPaper);
   const importFolder = useStorageStore((state) => state.importFolder);
   const cancelImport = useStorageStore((state) => state.cancelImport);
@@ -83,18 +86,22 @@ export function LibraryView({
   const dismissFolderSummary = useStorageStore((state) => state.dismissFolderSummary);
   const dismissStorageError = useStorageStore((state) => state.dismissError);
   const dismissMigrationNotice = useStorageStore((state) => state.dismissMigrationNotice);
+  const folders = useFoldersStore((state) => state.folders);
   // A renderer action failure is newer than the last main-process snapshot.
   const storageBannerError = storageError ?? storageInfo?.error ?? null;
-  const storageBusy = storageTask !== null;
+  // Any file-changing task or external tool process disables the mutating actions.
+  const storageBusy = busy.storageTask !== null || busy.toolTask !== null;
 
   const [queryText, setQueryText] = useState('');
   const [activeTag, setActiveTag] = useState<string | null>(null);
   const [filter, setFilter] = useState<LibraryFilter>('all');
+  const [folderId, setFolderId] = useState<FolderFilter>('all');
   const [sort, setSort] = useState<LibrarySort>('added');
   const [layout, setLayout] = useState<LayoutMode>('grid');
   const [openMenuId, setOpenMenuId] = useState<number | null>(null);
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [draft, setDraft] = useState<EditDraft | null>(null);
+  const [moveTarget, setMoveTarget] = useState<Paper | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [importError, setImportError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -109,13 +116,52 @@ export function LibraryView({
     setOpenMenuId(null);
   }, [papers.length]);
 
+  // A deleted folder must not leave the list filtered by a missing id.
+  useEffect(() => {
+    if (typeof folderId === 'number' && !folders.some((folder) => folder.id === folderId)) {
+      setFolderId('all');
+    }
+  }, [folderId, folders]);
+
+  // The edit dialog and the folder-import summary close on Escape like the
+  // other modals in the app.
+  useEffect(() => {
+    if (draft === null && lastFolderSummary === null) {
+      return;
+    }
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== 'Escape') {
+        return;
+      }
+      if (draft !== null) {
+        setDraft(null);
+      } else {
+        dismissFolderSummary();
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [draft, lastFolderSummary, dismissFolderSummary]);
+
   const tags = useMemo(() => collectTags(papers), [papers]);
   const stats = useMemo(() => libraryStats(papers, fileStatus), [papers, fileStatus]);
-  const visiblePapers = useMemo(
-    () => filterAndSortPapers(papers, fileStatus, { text: queryText, tag: activeTag, filter, sort }),
-    [papers, fileStatus, queryText, activeTag, filter, sort],
+  const folderNames = useMemo(
+    () => new Map(folders.map((folder) => [folder.id, folder.name])),
+    [folders],
   );
-  const hasFilters = queryText.trim() !== '' || activeTag !== null || filter !== 'all';
+  const visiblePapers = useMemo(
+    () =>
+      filterAndSortPapers(papers, fileStatus, {
+        text: queryText,
+        tag: activeTag,
+        filter,
+        sort,
+        folderId,
+      }),
+    [papers, fileStatus, queryText, activeTag, filter, sort, folderId],
+  );
+  const hasFilters =
+    queryText.trim() !== '' || activeTag !== null || filter !== 'all' || folderId !== 'all';
 
   const runAction = async (action: () => Promise<void>): Promise<void> => {
     setError(null);
@@ -125,6 +171,12 @@ export function LibraryView({
     } catch (actionError) {
       setError(errorMessage(actionError));
     }
+  };
+
+  // Folder deletion clears papers' folder ids in the DB, so reload the list
+  // after every folder change; runAction keeps failures in the page banner.
+  const handleFoldersChanged = async (): Promise<void> => {
+    await runAction(() => load());
   };
 
   const handleImport = (): void => {
@@ -262,6 +314,7 @@ export function LibraryView({
     setQueryText('');
     setActiveTag(null);
     setFilter('all');
+    setFolderId('all');
   };
 
   return (
@@ -447,7 +500,12 @@ export function LibraryView({
       </div>
 
       <div className="library-body">
-        <aside className="library-facets" aria-label="标签筛选">
+        <aside className="library-facets" aria-label="文件夹与标签筛选">
+          <LibraryFolders
+            selected={folderId}
+            onSelect={setFolderId}
+            onChanged={handleFoldersChanged}
+          />
           <h2 className="library-facet-heading">标签</h2>
           <button
             type="button"
@@ -518,6 +576,8 @@ export function LibraryView({
                 const translated = isTranslatedBound(paper);
                 const missing = isPaperMissing(paper, status);
                 const progress = readingProgress(paper);
+                const folderName =
+                  paper.folderId == null ? null : (folderNames.get(paper.folderId) ?? null);
                 const isActive = activePaperId === paper.id;
                 return (
                   <li
@@ -550,6 +610,11 @@ export function LibraryView({
                         {isActive && <span className="library-badge active">正在阅读</span>}
                         {missing && <span className="library-badge warning">文件缺失</span>}
                         {translated && <span className="library-badge accent">中英对照</span>}
+                        {folderName !== null && (
+                          <span className="library-badge folder" title={folderName}>
+                            {folderName}
+                          </span>
+                        )}
                         {paper.lastReadAt === null && (
                           <span className="library-badge">未读</span>
                         )}
@@ -629,6 +694,17 @@ export function LibraryView({
                           onClick={() => handleReveal(paper)}
                         >
                           打开所在文件夹
+                        </button>
+                        <button
+                          type="button"
+                          className="menu-button"
+                          disabled={storageBusy}
+                          onClick={() => {
+                            setOpenMenuId(null);
+                            setMoveTarget(paper);
+                          }}
+                        >
+                          移动到文件夹
                         </button>
                         <button
                           type="button"
@@ -751,6 +827,14 @@ export function LibraryView({
             </div>
           </form>
         </div>
+      )}
+      {moveTarget !== null && (
+        <MovePaperDialog
+          paper={moveTarget}
+          folders={folders}
+          onMove={(folderId) => updateMeta(moveTarget.id, { folderId })}
+          onClose={() => setMoveTarget(null)}
+        />
       )}
       {lastFolderSummary !== null && (
         <div

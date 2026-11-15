@@ -12,7 +12,7 @@ import type {
   ChatSendRequest,
   LegacyMigrationSummary,
   NoteType,
-  Paper,
+  PaperUpdatePatch,
 } from '@shared/types';
 import { abortChat, startChat } from '../ai/chat-service';
 import { AiClient } from '../ai/client';
@@ -24,6 +24,7 @@ import {
   listMessages,
   renameConversation,
 } from '../db/conversations';
+import { createFolder, getFolder, listFolders, removeFolder, renameFolder } from '../db/folders';
 import { createNote, deleteNote, listNotes, updateNote } from '../db/notes';
 import { getPaper, listPapers, markRead, updatePaper } from '../db/papers';
 import { searchGlobal } from '../db/search';
@@ -46,10 +47,6 @@ export interface HandlerDeps {
   emit: (channel: string, payload: unknown) => void;
   mainWindow: () => BrowserWindow | null;
 }
-
-type PaperUpdatePatch = Partial<
-  Pick<Paper, 'title' | 'authors' | 'year' | 'tags' | 'lastPageOriginal' | 'lastPageTranslated'>
->;
 
 type NoteCreateInput = {
   paperId: number;
@@ -203,10 +200,36 @@ export function registerIpcHandlers(deps: HandlerDeps): {
 
   electron.ipcMain.handle(
     'papers:update',
-    (_event, id: number, patch: PaperUpdatePatch) => updatePaper(db, id, patch),
+    (_event, id: number, patch: PaperUpdatePatch) => {
+      // `folderId` may clear the folder (null) but never point at a missing one.
+      if (
+        patch.folderId !== undefined &&
+        patch.folderId !== null &&
+        getFolder(db, patch.folderId) === null
+      ) {
+        throw new Error('文件夹不存在');
+      }
+      return updatePaper(db, id, patch);
+    },
   );
 
   electron.ipcMain.handle('papers:remove', (_event, id: number) => library.removePaper(id));
+
+  electron.ipcMain.handle('folders:list', () => listFolders(db));
+
+  electron.ipcMain.handle('folders:create', (_event, name: string) => createFolder(db, name));
+
+  electron.ipcMain.handle('folders:rename', (_event, id: number, name: string) => {
+    // The DB layer reports `文件夹不存在: <id>`; the UI needs the bare message.
+    if (getFolder(db, id) === null) {
+      throw new Error('文件夹不存在');
+    }
+    return renameFolder(db, id, name);
+  });
+
+  electron.ipcMain.handle('folders:remove', (_event, id: number) => {
+    removeFolder(db, id);
+  });
 
   electron.ipcMain.handle(
     'papers:markRead',
