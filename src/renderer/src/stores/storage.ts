@@ -151,6 +151,9 @@ export const useStorageStore = create<StorageState>()((set, get) => ({
   },
 
   async chooseAndChangeRoot() {
+    // A new attempt invalidates the previous success notice before anything
+    // can fail, so a stale "migrated" message never sits next to a new error.
+    set({ rootChangeNotice: null });
     try {
       const newRoot = await window.api.storage.chooseRoot();
       if (newRoot === null) {

@@ -29,6 +29,8 @@ export function LibrarySettingsTab(): React.JSX.Element {
   const root = info?.root ?? appSettings?.libraryRoot ?? '';
   const migration = lastMigration ?? info?.migration ?? null;
   const storageBusy = busy.storageTask !== null;
+  // A root change rewrites every managed path, so tool jobs must be idle too.
+  const changeRootBusy = storageBusy || busy.toolTask !== null;
   const error = actionError ?? storageError ?? info?.error ?? appSettingsError ?? null;
 
   const handleOpenRoot = (): void => {
@@ -74,7 +76,7 @@ export function LibrarySettingsTab(): React.JSX.Element {
         <button
           type="button"
           className="menu-button"
-          disabled={storageBusy}
+          disabled={changeRootBusy}
           onClick={handleChangeRoot}
         >
           更改位置

@@ -156,8 +156,11 @@ describe('useStorageStore.chooseAndChangeRoot', () => {
     expect(useStorageStore.getState().rootChangeNotice).toBeNull();
   });
 
-  it('changeRoot 失败时保留旧根目录并记录中文错误', async () => {
-    useStorageStore.setState({ info: makeInfo({ root: 'C:/library' }) });
+  it('changeRoot 失败时保留旧根目录、清除旧提示并记录中文错误', async () => {
+    useStorageStore.setState({
+      info: makeInfo({ root: 'C:/library' }),
+      rootChangeNotice: '已迁移 2 篇文献，旧位置的副本仍保留，可自行清理',
+    });
     api.storage.chooseRoot.mockResolvedValue('E:/blocked');
     api.storage.changeRoot.mockRejectedValue(new Error('新位置不可写，请选择其他文件夹'));
 

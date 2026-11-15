@@ -16,9 +16,18 @@ import type { NewPaperInput } from '@main/db/papers';
 import { JobRegistry } from '@main/jobs/job-registry';
 import { getStoredAppSettings, setLibraryRootSetting } from '@main/settings/app-settings';
 import { PaperLibrary } from '@main/storage/library-service';
-import { ORIGINAL_PDF_NAME, canonicalStorageDir, storageFile } from '@main/storage/paths';
+import {
+  CUSTOM_TRANSLATED_NAME,
+  ORIGINAL_PDF_NAME,
+  canonicalStorageDir,
+  storageFile,
+} from '@main/storage/paths';
 import { changeLibraryRoot } from '@main/storage/root-change';
-import { generateFixtures, SAMPLE_TEXT_PDF } from '../fixtures/generate';
+import {
+  generateFixtures,
+  SAMPLE_SCANNED_PDF,
+  SAMPLE_TEXT_PDF,
+} from '../fixtures/generate';
 
 const BUSY = '请先等待当前任务完成';
 const SAME_ROOT = '新位置与当前位置相同';
@@ -214,6 +223,45 @@ describe('changeLibraryRoot', () => {
     expect(getPaper(db, missing.id)?.storageDir).toBeNull();
     expect(getPaper(db, missing.id)?.filePathOriginal).toBe(join(tempDir, 'gone.pdf'));
     expect(getStoredAppSettings(db, documentsDir).libraryRoot).toBe(newRoot);
+  });
+
+  it('托管文件夹内的译本随文件夹复制并在新根目录下重新绑定', async () => {
+    const library = makeLibrary(oldRoot);
+    const imported = await library.importPaper(SAMPLE_TEXT_PDF);
+    const attached = await library.attachTranslated(imported.paper.id, SAMPLE_SCANNED_PDF);
+    expect(attached.filePathTranslated).toBe(
+      storageFile(oldRoot, attached.storageDir!, CUSTOM_TRANSLATED_NAME),
+    );
+
+    const result = await changeLibraryRoot(db, jobs, oldRoot, newRoot);
+
+    expect(result).toMatchObject({ migrated: 1, unmanaged: [] });
+    const moved = getPaper(db, imported.paper.id)!;
+    const rebased = storageFile(newRoot, moved.storageDir!, CUSTOM_TRANSLATED_NAME);
+    expect(moved.filePathTranslated).toBe(rebased);
+    expect(existsSync(rebased)).toBe(true);
+    // The old copy and the user's source file stay untouched.
+    expect(
+      existsSync(storageFile(oldRoot, moved.storageDir!, CUSTOM_TRANSLATED_NAME)),
+    ).toBe(true);
+    expect(existsSync(SAMPLE_SCANNED_PDF)).toBe(true);
+  });
+
+  it('托管文献的外部译本路径保持绝对路径不变且外部文件不动', async () => {
+    const imported = await makeLibrary(oldRoot).importPaper(SAMPLE_TEXT_PDF);
+    const external = makeExternal('external-translation.pdf', SAMPLE_SCANNED_PDF);
+    updatePaper(db, imported.paper.id, { filePathTranslated: external });
+
+    const result = await changeLibraryRoot(db, jobs, oldRoot, newRoot);
+
+    expect(result).toMatchObject({ migrated: 1, unmanaged: [] });
+    const moved = getPaper(db, imported.paper.id)!;
+    expect(moved.filePathTranslated).toBe(external);
+    expect(existsSync(external)).toBe(true);
+    // The external file was never copied into the managed folder.
+    expect(
+      existsSync(storageFile(newRoot, moved.storageDir!, CUSTOM_TRANSLATED_NAME)),
+    ).toBe(false);
   });
 
   it('标题改过的已托管文献按存储文件夹的编号后缀迁移', async () => {
