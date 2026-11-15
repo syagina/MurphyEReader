@@ -125,3 +125,71 @@ export interface SearchResult {
   conversationId?: number;
   noteId?: number;
 }
+
+/** Storage-changing tasks; only one may run at a time. */
+export type StorageTask =
+  | 'import'
+  | 'importFolder'
+  | 'migrateLegacy'
+  | 'changeRoot'
+  | 'attachTranslated'
+  | 'relocate'
+  | 'remove'
+  | 'ensureManaged'
+  | 'translate';
+
+/** External tool jobs; only one may run at a time. */
+export type ToolTask = 'install' | 'warmup' | 'translate';
+
+/** Snapshot of everything the main process is currently busy with. */
+export interface JobState {
+  storageTask: StorageTask | null;
+  storagePaperId: number | null;
+  toolTask: ToolTask | null;
+  toolJobId: string | null;
+  translatingPaperId: number | null;
+}
+
+export interface ToolProgressEvent {
+  jobId: string;
+  kind: ToolTask;
+  line: string;
+  percent: number | null;
+}
+
+export interface ToolDoneEvent {
+  jobId: string;
+  kind: ToolTask;
+  ok: boolean;
+  canceled: boolean;
+  message: string | null;
+}
+
+export interface CommandInvocation {
+  file: string;
+  args: string[];
+}
+
+export interface ToolRunOptions {
+  jobId: string;
+  kind: ToolTask;
+  command: CommandInvocation;
+  timeoutMs?: number;
+  redact?: string[];
+  parsePercent?: (line: string) => number | null;
+  onLine?: (line: string, percent: number | null) => void;
+}
+
+export interface ToolRunResult {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  lines: string[];
+  canceled: boolean;
+  timedOut: boolean;
+}
+
+export interface ToolJobRunnerOptions {
+  spawn?: typeof import('node:child_process').spawn;
+  killTree?: (pid: number) => Promise<void> | void;
+  throttleMs?: number;
+}
