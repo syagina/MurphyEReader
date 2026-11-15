@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ExportFormat, Paper } from '@shared/types';
-import { errorMessage } from '../lib/errors';
+import { uiErrorMessage } from '../lib/errors';
 import { EXPORT_FORMAT_LABELS, exportNoteDocument } from '../lib/export-note';
 import {
   NOTE_TYPE_SECTIONS,
@@ -71,7 +71,7 @@ export function NotesPanel({ paper }: NotesPanelProps): React.JSX.Element {
         { scope: 'all' },
       );
     } catch (exportError) {
-      setLocalError(errorMessage(exportError));
+      setLocalError(uiErrorMessage(exportError));
     } finally {
       setExporting(false);
     }

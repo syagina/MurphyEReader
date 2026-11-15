@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { stripIpcErrorPrefix } from '@renderer/lib/errors';
+import { stripIpcErrorPrefix, uiErrorMessage } from '@renderer/lib/errors';
 
 describe('stripIpcErrorPrefix', () => {
   it('去掉 Electron 远程调用前缀与内部的 Error 标记', () => {
@@ -28,5 +28,19 @@ describe('stripIpcErrorPrefix', () => {
     expect(stripIpcErrorPrefix('boom')).toBe('boom');
     const embedded = "前缀 Error invoking remote method 'x': Error: boom";
     expect(stripIpcErrorPrefix(embedded)).toBe(embedded);
+  });
+});
+
+describe('uiErrorMessage', () => {
+  it('Error 消息里的 Electron 远程调用前缀同样去掉', () => {
+    expect(
+      uiErrorMessage(
+        new Error("Error invoking remote method 'folders:create': Error: 已有同名文件夹"),
+      ),
+    ).toBe('已有同名文件夹');
+  });
+
+  it('没有前缀的中文 Error 原样返回', () => {
+    expect(uiErrorMessage(new Error('无法读取文献文件'))).toBe('无法读取文献文件');
   });
 });

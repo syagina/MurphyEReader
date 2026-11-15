@@ -590,7 +590,7 @@ describe('PaperLibrary.ensureManaged', () => {
     }
   });
 
-  it('本服务已持有的 ensureManaged 租约视为重入，不释放外层标记', async () => {
+  it('已持有的 ensureManaged 租约不再放行重入，收养报忙', async () => {
     const external = join(tempDir, 'legacy.pdf');
     copyFileSync(SAMPLE_TEXT_PDF, external);
     const paper = createPaper(db, makeInput({ filePathOriginal: external }));
@@ -598,13 +598,49 @@ describe('PaperLibrary.ensureManaged', () => {
     jobs.tryAcquireStorage('ensureManaged');
 
     try {
-      const adopted = await library.ensureManaged(paper.id);
-
-      expect(adopted.storageDir).toBe(canonicalStorageDir(paper.id, paper.title));
+      await expect(library.ensureManaged(paper.id)).rejects.toThrow(BUSY);
+      expect(getPaper(db, paper.id)?.storageDir).toBeNull();
+      expect(existsSync(join(root, canonicalStorageDir(paper.id, paper.title)))).toBe(false);
       expect(jobs.getState().storageTask).toBe('ensureManaged');
     } finally {
       jobs.releaseStorage();
     }
+  });
+
+  it('两个未托管文献并发收养时只有一个成功', async () => {
+    const externalA = join(tempDir, 'legacy-a.pdf');
+    const externalB = join(tempDir, 'legacy-b.pdf');
+    copyFileSync(SAMPLE_TEXT_PDF, externalA);
+    copyFileSync(SAMPLE_SCANNED_PDF, externalB);
+    const paperA = createPaper(
+      db,
+      makeInput({ title: '外部文献甲', filePathOriginal: externalA }),
+    );
+    const paperB = createPaper(
+      db,
+      makeInput({ title: '外部文献乙', filePathOriginal: externalB }),
+    );
+    const library = makeLibrary();
+
+    // The first call acquires the storage lease synchronously before its first
+    // await, so the second call deterministically loses the race.
+    const first = library.ensureManaged(paperA.id);
+    const second = library.ensureManaged(paperB.id);
+    const settled = await Promise.allSettled([first, second]);
+
+    expect(settled.filter((result) => result.status === 'fulfilled')).toHaveLength(1);
+    const rejected = settled.filter(
+      (result): result is PromiseRejectedResult => result.status === 'rejected',
+    );
+    expect(rejected).toHaveLength(1);
+    expect(rejected[0].reason).toBeInstanceOf(Error);
+    expect((rejected[0].reason as Error).message).toBe(BUSY);
+
+    const papers = [paperA, paperB];
+    const loser = papers.find((paper) => getPaper(db, paper.id)?.storageDir === null);
+    expect(loser).toBeDefined();
+    expect(existsSync(join(root, canonicalStorageDir(loser!.id, loser!.title)))).toBe(false);
+    expect(jobs.getState().storageTask).toBeNull();
   });
 
   it('收养失败时释放 ensureManaged 租约', async () => {

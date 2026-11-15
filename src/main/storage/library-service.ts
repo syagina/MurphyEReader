@@ -376,10 +376,10 @@ export class PaperLibrary {
   }
 
   /**
-   * Guarantees a managed, canonical folder for the paper. Only this service's
-   * own re-entrant `ensureManaged` marker means the call is already nested
-   * inside the adoption lease; every other held storage marker must stay
-   * mutually exclusive and surface the standard busy error.
+   * Guarantees a managed, canonical folder for the paper. The method is not
+   * re-entrant: every unmanaged paper owns its own `ensureManaged` lease for
+   * the adoption, so a second concurrent adoption surfaces the standard busy
+   * error instead of trusting a marker some other call happened to hold.
    */
   async ensureManaged(paperId: number): Promise<Paper> {
     const paper = this.requirePaper(paperId);
@@ -388,10 +388,6 @@ export class PaperLibrary {
         throw new Error(INVALID_MANAGED_PATH_MESSAGE);
       }
       return paper;
-    }
-
-    if (this.jobs.getState().storageTask === 'ensureManaged') {
-      return await adoptUnmanagedPaper(this.db, this.getRoot(), paper);
     }
 
     this.jobs.tryAcquireStorage('ensureManaged');

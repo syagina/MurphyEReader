@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { ExportFormat, Note, Paper } from '@shared/types';
-import { errorMessage } from '../lib/errors';
+import { uiErrorMessage } from '../lib/errors';
 import { EXPORT_FORMAT_LABELS, exportNoteDocument } from '../lib/export-note';
 import {
   buildNoteExportFileName,
@@ -69,7 +69,7 @@ export function NoteEditor({ paper, note, onClose }: NoteEditorProps): React.JSX
         { paperId: paper.id, scope: 'note' },
       );
     } catch (exportError) {
-      setLocalError(errorMessage(exportError));
+      setLocalError(uiErrorMessage(exportError));
     } finally {
       setExporting(false);
     }
@@ -101,7 +101,7 @@ export function NoteEditor({ paper, note, onClose }: NoteEditorProps): React.JSX
   };
 
   const handleClose = (): void => {
-    if (mode === 'edit' && dirty && !window.confirm('有未保存的修改，确定关闭？')) {
+    if (dirty && !window.confirm('有未保存的修改，确定关闭？')) {
       return;
     }
     onClose();

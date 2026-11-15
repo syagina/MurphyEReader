@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import type { Folder, Paper } from '@shared/types';
-import { errorMessage } from '../lib/errors';
+import { uiErrorMessage } from '../lib/errors';
 
 export interface MovePaperDialogProps {
   paper: Paper;
@@ -45,7 +45,7 @@ export function MovePaperDialog({
         onClose();
       },
       (moveError: unknown) => {
-        setError(errorMessage(moveError));
+        setError(uiErrorMessage(moveError));
         setSelected(paper.folderId);
         setMoving(false);
       },

@@ -49,8 +49,12 @@ export default function App(): React.JSX.Element {
   // (or keyboard/double-click) writes it through app settings.
   const [aiWidth, setAiWidth] = useState(AI_PANEL_DEFAULT_WIDTH);
   const [resizing, setResizing] = useState(false);
-  // Pointer origin of the active separator drag; null when not dragging.
-  const resizeStartRef = useRef<{ startX: number; startWidth: number } | null>(null);
+  // Pointer origin and id of the active separator drag; null when not dragging.
+  const resizeStartRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startWidth: number;
+  } | null>(null);
   // Focus mode hides the top bar, library chrome and outline, and asks the
   // main process for a real full-screen window.
   const [focusMode, setFocusMode] = useState(false);
@@ -245,13 +249,22 @@ export default function App(): React.JSX.Element {
     }
     event.preventDefault();
     event.currentTarget.setPointerCapture(event.pointerId);
-    resizeStartRef.current = { startX: event.clientX, startWidth: aiWidth };
+    resizeStartRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startWidth: aiWidth,
+    };
     setResizing(true);
   };
 
   const handleResizerPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
     const start = resizeStartRef.current;
-    if (start === null) {
+    if (
+      start === null ||
+      start.pointerId !== event.pointerId ||
+      !event.currentTarget.hasPointerCapture(event.pointerId) ||
+      (event.buttons & 1) === 0
+    ) {
       return;
     }
     setAiWidth(
@@ -261,7 +274,7 @@ export default function App(): React.JSX.Element {
 
   const handleResizerPointerUp = (event: React.PointerEvent<HTMLDivElement>): void => {
     const start = resizeStartRef.current;
-    if (start === null) {
+    if (start === null || start.pointerId !== event.pointerId) {
       return;
     }
     resizeStartRef.current = null;
@@ -279,6 +292,51 @@ export default function App(): React.JSX.Element {
     setAiWidth(width);
     persistAiWidth(width);
   };
+
+  // A cancelled drag must never keep the separator hot: clearing the ref makes
+  // later pointermoves and pointerup no-ops, and only a real pointerup persists.
+  const handleResizerPointerCancel = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (resizeStartRef.current === null) {
+      return;
+    }
+    resizeStartRef.current = null;
+    setResizing(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const handleResizerLostPointerCapture = (): void => {
+    // Idempotent after pointerup/pointercancel: only an active drag is cleared.
+    if (resizeStartRef.current === null) {
+      return;
+    }
+    resizeStartRef.current = null;
+    setResizing(false);
+  };
+
+  // The separator disappears when the panel collapses or focus mode starts;
+  // never leave an abandoned drag behind for the next mount.
+  useEffect(() => {
+    if (aiCollapsed || focusMode) {
+      resizeStartRef.current = null;
+      setResizing(false);
+    }
+  }, [aiCollapsed, focusMode]);
+
+  // Losing window focus ends the gesture without a pointerup; clear it so a
+  // later hover cannot resize the panel.
+  useEffect(() => {
+    const handleWindowBlur = (): void => {
+      if (resizeStartRef.current === null) {
+        return;
+      }
+      resizeStartRef.current = null;
+      setResizing(false);
+    };
+    window.addEventListener('blur', handleWindowBlur);
+    return () => window.removeEventListener('blur', handleWindowBlur);
+  }, []);
 
   const handleResizerKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
     if (event.key === 'Home') {
@@ -620,7 +678,10 @@ export default function App(): React.JSX.Element {
                 onJudgeDepth={handleJudgeDepth}
                 onSaveNote={handleSaveNote}
                 onCaptureAsk={handleCaptureAsk}
-                onOpenSettings={() => setSettingsOpen(true)}
+                onOpenSettings={() => {
+                  setSettingsTab('ai');
+                  setSettingsOpen(true);
+                }}
                 onOpenEngineSettings={openEngineSettings}
               />
             </div>
@@ -641,6 +702,8 @@ export default function App(): React.JSX.Element {
               onPointerDown={handleResizerPointerDown}
               onPointerMove={handleResizerPointerMove}
               onPointerUp={handleResizerPointerUp}
+              onPointerCancel={handleResizerPointerCancel}
+              onLostPointerCapture={handleResizerLostPointerCapture}
               onKeyDown={handleResizerKeyDown}
               onDoubleClick={resetAiWidth}
             />

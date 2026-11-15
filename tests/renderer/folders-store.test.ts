@@ -82,6 +82,17 @@ describe('useFoldersStore.create', () => {
     expect(useFoldersStore.getState().folders).toEqual([existing]);
     expect(useFoldersStore.getState().error).toBe('已有同名文件夹');
   });
+
+  it('创建失败时去掉 Electron 远程调用前缀再记录', async () => {
+    api.create.mockRejectedValue(
+      new Error("Error invoking remote method 'folders:create': Error: 已有同名文件夹"),
+    );
+
+    const returned = await useFoldersStore.getState().create('毕业论文');
+
+    expect(returned).toBeNull();
+    expect(useFoldersStore.getState().error).toBe('已有同名文件夹');
+  });
 });
 
 describe('useFoldersStore.rename', () => {

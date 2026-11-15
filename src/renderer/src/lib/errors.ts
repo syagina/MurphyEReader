@@ -19,3 +19,11 @@ const IPC_ERROR_PREFIX = /^Error invoking remote method '[^']+': (?:Error: )?/;
 export function stripIpcErrorPrefix(message: string): string {
   return message.replace(IPC_ERROR_PREFIX, '');
 }
+
+/**
+ * UI-facing normalizer: `errorMessage` plus Electron's IPC wrapper removed, so
+ * messages from `ipcMain.handle` rejections render as the Chinese text alone.
+ */
+export function uiErrorMessage(error: unknown): string {
+  return stripIpcErrorPrefix(errorMessage(error));
+}

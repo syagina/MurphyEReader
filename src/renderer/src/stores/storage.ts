@@ -7,7 +7,7 @@ import type {
   RootChangeResult,
   StorageInfo,
 } from '@shared/types';
-import { errorMessage } from '../lib/errors';
+import { uiErrorMessage } from '../lib/errors';
 import { useAppSettingsStore } from './app-settings';
 import { useLibraryStore } from './library';
 
@@ -90,7 +90,7 @@ export const useStorageStore = create<StorageState>()((set, get) => ({
             .getState()
             .load()
             .catch((error: unknown) => {
-              set({ error: errorMessage(error), errorDismissed: false });
+              set({ error: uiErrorMessage(error), errorDismissed: false });
             });
         }
       });
@@ -140,11 +140,11 @@ export const useStorageStore = create<StorageState>()((set, get) => ({
         try {
           await useLibraryStore.getState().load();
         } catch (error) {
-          set({ error: errorMessage(error), errorDismissed: false });
+          set({ error: uiErrorMessage(error), errorDismissed: false });
         }
       }
     } catch (error) {
-      set({ error: errorMessage(error), errorDismissed: false });
+      set({ error: uiErrorMessage(error), errorDismissed: false });
     } finally {
       set({ loading: false });
     }
@@ -160,7 +160,7 @@ export const useStorageStore = create<StorageState>()((set, get) => ({
     } catch (error) {
       // The manual retry is a user action; keep its Chinese error in the
       // storage banner instead of rejecting into a click handler.
-      set({ error: errorMessage(error), errorDismissed: false });
+      set({ error: uiErrorMessage(error), errorDismissed: false });
       return null;
     } finally {
       set({ loading: false });
@@ -191,16 +191,16 @@ export const useStorageStore = create<StorageState>()((set, get) => ({
         try {
           await useLibraryStore.getState().load();
         } catch (error) {
-          set({ error: errorMessage(error), errorDismissed: false });
+          set({ error: uiErrorMessage(error), errorDismissed: false });
         }
       } catch (error) {
         // The change never happened: leave `info.root` on the old library.
-        set({ error: errorMessage(error), errorDismissed: false });
+        set({ error: uiErrorMessage(error), errorDismissed: false });
       } finally {
         set({ loading: false });
       }
     } catch (error) {
-      set({ error: errorMessage(error), errorDismissed: false });
+      set({ error: uiErrorMessage(error), errorDismissed: false });
     }
   },
 
@@ -221,11 +221,11 @@ export const useStorageStore = create<StorageState>()((set, get) => ({
       try {
         await useLibraryStore.getState().load();
       } catch (error) {
-        set({ error: errorMessage(error), errorDismissed: false });
+        set({ error: uiErrorMessage(error), errorDismissed: false });
       }
       return summary;
     } catch (error) {
-      set({ error: errorMessage(error), errorDismissed: false, importProgress: null });
+      set({ error: uiErrorMessage(error), errorDismissed: false, importProgress: null });
       return null;
     }
   },
@@ -234,7 +234,7 @@ export const useStorageStore = create<StorageState>()((set, get) => ({
     try {
       await window.api.storage.cancelImport();
     } catch (error) {
-      set({ error: errorMessage(error), errorDismissed: false });
+      set({ error: uiErrorMessage(error), errorDismissed: false });
     }
   },
 

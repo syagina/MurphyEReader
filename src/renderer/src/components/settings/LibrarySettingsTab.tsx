@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { errorMessage } from '../../lib/errors';
+import { uiErrorMessage } from '../../lib/errors';
 import { useAppSettingsStore } from '../../stores/app-settings';
 import { useStorageStore } from '../../stores/storage';
 
@@ -36,7 +36,7 @@ export function LibrarySettingsTab(): React.JSX.Element {
   const handleOpenRoot = (): void => {
     setActionError(null);
     void openRoot().catch((openError: unknown) => {
-      setActionError(errorMessage(openError));
+      setActionError(uiErrorMessage(openError));
     });
   };
 
@@ -85,6 +85,9 @@ export function LibrarySettingsTab(): React.JSX.Element {
 
       <p className="settings-library-hint">
         单篇笔记 → 文献文件夹/notes/；全部笔记 → exports/
+      </p>
+      <p className="settings-library-hint">
+        文献库文件夹只用于界面分类，文献在磁盘上仍按每篇一个文件夹存放；移动文献不会搬动文件。
       </p>
 
       <div className="settings-library-migration">

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { Folder } from '@shared/types';
-import { errorMessage } from '../lib/errors';
+import { uiErrorMessage } from '../lib/errors';
 
 export interface FoldersState {
   folders: Folder[];
@@ -24,7 +24,7 @@ export const useFoldersStore = create<FoldersState>()((set) => ({
       const folders = await window.api.folders.list();
       set({ folders });
     } catch (loadError) {
-      set({ error: errorMessage(loadError) });
+      set({ error: uiErrorMessage(loadError) });
     } finally {
       set({ loading: false });
     }
@@ -37,7 +37,7 @@ export const useFoldersStore = create<FoldersState>()((set) => ({
       set((state) => ({ folders: [...state.folders, folder] }));
       return folder;
     } catch (createError) {
-      set({ error: errorMessage(createError) });
+      set({ error: uiErrorMessage(createError) });
       return null;
     }
   },
@@ -51,7 +51,7 @@ export const useFoldersStore = create<FoldersState>()((set) => ({
       }));
       return folder;
     } catch (renameError) {
-      set({ error: errorMessage(renameError) });
+      set({ error: uiErrorMessage(renameError) });
       return null;
     }
   },
@@ -63,7 +63,7 @@ export const useFoldersStore = create<FoldersState>()((set) => ({
       set((state) => ({ folders: state.folders.filter((folder) => folder.id !== id) }));
       return true;
     } catch (removeError) {
-      set({ error: errorMessage(removeError) });
+      set({ error: uiErrorMessage(removeError) });
       return false;
     }
   },
