@@ -2,6 +2,7 @@ import { spawn as nodeSpawn } from 'node:child_process';
 import type { ChildProcess, SpawnOptions } from 'node:child_process';
 import { StringDecoder } from 'node:string_decoder';
 import type {
+  CommandInvocation,
   ToolJobRunnerOptions,
   ToolProgressEvent,
   ToolRunOptions,
@@ -16,6 +17,16 @@ const SPAWN_OPTIONS: SpawnOptions = {
   windowsHide: true,
   stdio: ['ignore', 'pipe', 'pipe'],
 };
+// Batch shims are pre-quoted into one cmd.exe /c argument by
+// buildCommandInvocation; libuv must not escape those quotes again.
+const CMD_SPAWN_OPTIONS: SpawnOptions = {
+  ...SPAWN_OPTIONS,
+  windowsVerbatimArguments: true,
+};
+
+function spawnOptionsFor(command: CommandInvocation): SpawnOptions {
+  return command.file.toLowerCase() === 'cmd.exe' ? CMD_SPAWN_OPTIONS : SPAWN_OPTIONS;
+}
 
 interface ActiveJob {
   pid: number | null;
@@ -128,7 +139,7 @@ export class ToolJobRunner {
 
       let child: ChildProcess;
       try {
-        child = this.spawn(command.file, command.args, SPAWN_OPTIONS);
+        child = this.spawn(command.file, command.args, spawnOptionsFor(command));
       } catch (error) {
         fail(`无法启动进程：${errorMessage(error)}`);
         return;

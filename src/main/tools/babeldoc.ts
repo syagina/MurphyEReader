@@ -29,6 +29,11 @@ function quoteCmdArgument(value: string): string {
  * Turns an executable plus its arguments into the spawn file/args pair.
  * Windows batch shims (.cmd/.bat) must run through `cmd.exe /d /s /c` so a
  * path containing spaces stays a single executable argument (Review Focus #4).
+ *
+ * The command is wrapped in one extra pair of quotes: `/s` strips the first
+ * and last quote of the command string, which would otherwise unquote the
+ * executable path. The runner passes cmd.exe arguments verbatim so libuv does
+ * not escape the inner quotes.
  */
 export function buildCommandInvocation(
   executable: string,
@@ -38,7 +43,7 @@ export function buildCommandInvocation(
   const lower = executable.toLowerCase();
   if (platform === 'win32' && (lower.endsWith('.cmd') || lower.endsWith('.bat'))) {
     const command = [`"${executable}"`, ...args.map(quoteCmdArgument)].join(' ');
-    return { file: 'cmd.exe', args: ['/d', '/s', '/c', command] };
+    return { file: 'cmd.exe', args: ['/d', '/s', '/c', `"${command}"`] };
   }
   return { file: executable, args: [...args] };
 }

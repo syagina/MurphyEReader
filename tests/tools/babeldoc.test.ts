@@ -1,9 +1,13 @@
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   babeldocCandidates,
   buildCommandInvocation,
   uvCandidates,
 } from '@main/tools/babeldoc';
+import { ToolJobRunner } from '@main/tools/job-runner';
 
 const ENV = {
   USERPROFILE: 'C:\\Users\\me',
@@ -37,7 +41,8 @@ describe('buildCommandInvocation', () => {
     const invocation = buildCommandInvocation('C:\\Tools\\run.bat', ['--warmup'], 'win32');
 
     expect(invocation.file).toBe('cmd.exe');
-    expect(invocation.args[3]).toBe('"C:\\Tools\\run.bat" --warmup');
+    // cmd /s strips the outermost pair, leaving "<exe>" --warmup.
+    expect(invocation.args[3]).toBe('""C:\\Tools\\run.bat" --warmup"');
   });
 
   it('.exe 直接 spawn，参数原样传递', () => {
@@ -67,13 +72,12 @@ describe('buildCommandInvocation', () => {
     );
 
     expect(invocation.args[3]).toBe(
-      '"C:\\Tools\\babeldoc.cmd" --config "C:\\My Files\\config.toml" --qps 4',
+      '""C:\\Tools\\babeldoc.cmd" --config "C:\\My Files\\config.toml" --qps 4"',
     );
   });
 });
 
-describe('babeldocCandidates', () => {
-  it('已配置的路径排在第一位', () => {
+describe('babeldocCandidates', () => {  it('已配置的路径排在第一位', () => {
     const candidates = babeldocCandidates({
       configuredPath: 'C:\\Tools\\babeldoc.cmd',
       env: ENV,
@@ -156,5 +160,36 @@ describe('uvCandidates', () => {
     });
 
     expect(candidates).toEqual([LOCALAPPDATA_UV]);
+  });
+});
+
+/**
+ * Review Focus #4 end to end: a real `.cmd` shim under a folder with spaces
+ * must run through the real runner with every argument intact.
+ */
+describe.skipIf(process.platform !== 'win32')('cmd.exe shim integration', () => {
+  it('路径含空格的 .cmd 由真实 ToolJobRunner 运行且参数完整', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'paperlens cmd shim '));
+    const shim = join(dir, 'probe.cmd');
+    writeFileSync(shim, '@echo off\r\necho ARG1=[%1] ARG2=[%2]\r\nexit /b 0\r\n');
+    try {
+      const runner = new ToolJobRunner(() => {});
+      const result = await runner.run({
+        jobId: 'cmd-shim',
+        kind: 'warmup',
+        command: buildCommandInvocation(
+          shim,
+          ['--help', 'C:\\My Files\\config.toml'],
+          'win32',
+        ),
+      });
+
+      expect(result.code).toBe(0);
+      const output = result.lines.join('\n');
+      expect(output).toContain('--help');
+      expect(output).toContain('C:\\My Files\\config.toml');
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 });

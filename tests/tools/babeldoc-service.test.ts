@@ -272,7 +272,7 @@ describe('BabeldocService.warmup', () => {
         kind: 'warmup',
         command: {
           file: 'cmd.exe',
-          args: ['/d', '/s', '/c', `"${cmdPath}" --warmup`],
+          args: ['/d', '/s', '/c', `""${cmdPath}" --warmup"`],
         },
       }),
     );
