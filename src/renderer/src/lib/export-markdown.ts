@@ -1,37 +1,19 @@
+import { sanitizeFileNamePart } from '@shared/file-name';
 import type { ExportFormat, Note, NoteType, Paper } from '@shared/types';
 import { formatTimestamp } from './format';
+
+export { sanitizeFileNamePart };
 
 export interface NoteTypeSection {
   type: NoteType;
   heading: string;
 }
 
-/** Windows refuses these characters in file names; controls are also unsafe. */
-const ILLEGAL_FILENAME_CHARS = /[<>:"/\\|?*\u0000-\u001f\u007f]+/g;
-
 const EXPORT_EXTENSIONS: Record<ExportFormat, string> = {
   md: 'md',
   pdf: 'pdf',
   docx: 'docx',
 };
-
-const FILE_NAME_PART_LIMIT = 80;
-
-/**
- * Sanitizes one component of a save-dialog file name. Illegal Windows
- * characters become `_`; whitespace is collapsed; leading/trailing dots,
- * underscores and spaces are stripped; very long titles are shortened so a
- * paper title plus a note title still leaves room for folders and extensions.
- */
-export function sanitizeFileNamePart(value: string, fallback: string): string {
-  const sanitized = value
-    .replace(ILLEGAL_FILENAME_CHARS, '_')
-    .replace(/\s+/g, ' ')
-    .trim()
-    .replace(/^[._\s]+|[._\s]+$/g, '');
-  const shortened = sanitized.slice(0, FILE_NAME_PART_LIMIT).replace(/[._\s]+$/g, '');
-  return shortened === '' ? fallback : shortened;
-}
 
 /**
  * Builds the save-dialog default name for a paper's notes export. The
