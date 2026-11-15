@@ -34,6 +34,12 @@ export interface Paper {
   lastReadAt: number | null;
 }
 
+/** Result of a single-file import; `duplicate` means no new row was added. */
+export interface ImportPaperResult {
+  paper: Paper;
+  duplicate: boolean;
+}
+
 export interface Conversation {
   id: number;
   paperId: number;

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { PaperLensApi } from '@shared/ipc';
-import type { Paper } from '@shared/types';
+import type { ImportPaperResult, Paper } from '@shared/types';
 
 export interface FileStatus {
   originalExists: boolean;
@@ -14,12 +14,14 @@ export interface LibraryState {
   loading: boolean;
   fileStatus: Record<number, FileStatus>;
   load(): Promise<void>;
-  importPaper(): Promise<void>;
-  attachTranslated(id: number): Promise<void>;
+  importPaper(): Promise<ImportPaperResult | null>;
+  attachTranslated(id: number): Promise<Paper | null>;
   relocate(id: number, version: 'original' | 'translated'): Promise<void>;
   removePaper(id: number): Promise<void>;
   updateMeta(id: number, patch: PaperUpdatePatch): Promise<void>;
 }
+
+const REPLACE_TRANSLATION_CONFIRM = '该文献已有译本，确定用新文件替换吗？';
 
 export const useLibraryStore = create<LibraryState>()((set, get) => ({
   papers: [],
@@ -45,26 +47,37 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
   },
 
   async importPaper() {
-    const paper = await window.api.papers.importOriginal();
-    if (paper === null) {
-      return;
+    const result = await window.api.papers.importOriginal();
+    if (result === null) {
+      return null;
     }
-    set((state) => ({
-      papers: [paper, ...state.papers],
-      fileStatus: {
-        ...state.fileStatus,
-        [paper.id]: { originalExists: true, translatedExists: false },
-      },
-    }));
+    // A duplicate already has a row; leave the list untouched so the caller
+    // can simply highlight the existing card.
+    if (!result.duplicate) {
+      set((state) => ({
+        papers: [result.paper, ...state.papers],
+        fileStatus: {
+          ...state.fileStatus,
+          [result.paper.id]: { originalExists: true, translatedExists: false },
+        },
+      }));
+    }
+    return result;
   },
 
   async attachTranslated(id) {
+    const existing = get().papers.find((paper) => paper.id === id);
+    if (existing !== undefined && existing.filePathTranslated !== null) {
+      if (!window.confirm(REPLACE_TRANSLATION_CONFIRM)) {
+        return null;
+      }
+    }
     const paper = await window.api.papers.attachTranslated(id);
     if (paper === null) {
-      return;
+      return null;
     }
     set((state) => ({
-      papers: state.papers.map((existing) => (existing.id === paper.id ? paper : existing)),
+      papers: state.papers.map((current) => (current.id === paper.id ? paper : current)),
       fileStatus: {
         ...state.fileStatus,
         [paper.id]: {
@@ -73,6 +86,7 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
         },
       },
     }));
+    return paper;
   },
 
   async relocate(id, version) {

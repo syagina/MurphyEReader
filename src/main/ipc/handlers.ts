@@ -17,19 +17,20 @@ import {
   renameConversation,
 } from '../db/conversations';
 import { createNote, deleteNote, listNotes, updateNote } from '../db/notes';
-import { replacePages } from '../db/pages';
-import { deletePaper, getPaper, listPapers, markRead, updatePaper } from '../db/papers';
+import { getPaper, listPapers, markRead, updatePaper } from '../db/papers';
 import { searchGlobal } from '../db/search';
 import { ensureFileExtension } from '../export/file-path';
 import { PdfExporter } from '../export/pdf-exporter';
-import { attachTranslatedPdf, importPaper } from '../papers/import-service';
-import { extractPdf, getPdfPageCount } from '../pdf/extract';
+import { JobRegistry } from '../jobs/job-registry';
 import { getApiKey, getSettings, setSettings } from '../settings';
+import { getStoredAppSettings } from '../settings/app-settings';
 import type { SecretStore } from '../settings/secret-store';
+import { PaperLibrary } from '../storage/library-service';
 
 export interface HandlerDeps {
   db: Database.Database;
   secret: SecretStore;
+  documentsDir: string;
   emit: (channel: string, payload: unknown) => void;
   mainWindow: () => BrowserWindow | null;
 }
@@ -94,8 +95,14 @@ export async function toLoadPayload(
   return { data, fileName: basename(filePath) };
 }
 
-export function registerIpcHandlers(deps: HandlerDeps): void {
+export function registerIpcHandlers(deps: HandlerDeps): { jobs: JobRegistry } {
   const { db, secret, emit } = deps;
+  const jobs = new JobRegistry();
+  const library = new PaperLibrary({
+    db,
+    jobs,
+    getRoot: () => getStoredAppSettings(db, deps.documentsDir).libraryRoot,
+  });
   const pdfExporter = new PdfExporter({
     preloadPath: join(__dirname, '../preload/index.js'),
     rendererFile: join(__dirname, '../renderer/index.html'),
@@ -135,7 +142,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     if (filePath === null) {
       return null;
     }
-    return importPaper(db, filePath);
+    return library.importPaper(filePath);
   });
 
   electron.ipcMain.handle('papers:attachTranslated', async (_event, id: number) => {
@@ -143,7 +150,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     if (filePath === null) {
       return null;
     }
-    return attachTranslatedPdf(db, id, filePath);
+    return library.attachTranslated(id, filePath);
   });
 
   electron.ipcMain.handle(
@@ -151,9 +158,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     (_event, id: number, patch: PaperUpdatePatch) => updatePaper(db, id, patch),
   );
 
-  electron.ipcMain.handle('papers:remove', (_event, id: number) => {
-    deletePaper(db, id);
-  });
+  electron.ipcMain.handle('papers:remove', (_event, id: number) => library.removePaper(id));
 
   electron.ipcMain.handle(
     'papers:markRead',
@@ -180,24 +185,7 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       if (filePath === null) {
         return null;
       }
-      const paper = getPaper(db, id);
-      if (paper === null) {
-        throw new Error(`文献不存在: ${id}`);
-      }
-      if (version === 'translated') {
-        const pageCountTranslated = await getPdfPageCount(filePath);
-        return updatePaper(db, id, { filePathTranslated: filePath, pageCountTranslated });
-      }
-      const extracted = await extractPdf(filePath);
-      const updated = updatePaper(db, id, {
-        filePathOriginal: filePath,
-        pageCountOriginal: extracted.pageCount,
-        hasTextLayer: extracted.hasTextLayer,
-        outline: extracted.outline,
-        lastPageOriginal: Math.min(paper.lastPageOriginal, extracted.pageCount),
-      });
-      replacePages(db, id, extracted.pages);
-      return updated;
+      return library.relocate(id, version, filePath);
     },
   );
 
@@ -380,4 +368,6 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
     }));
     return client.testConnection();
   });
+
+  return { jobs };
 }

@@ -71,6 +71,7 @@ export function LibraryView({
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [draft, setDraft] = useState<EditDraft | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
 
   useEffect(() => {
     void load().catch((loadError: unknown) => {
@@ -100,7 +101,22 @@ export function LibraryView({
   };
 
   const handleImport = (): void => {
-    void runAction(importPaper);
+    setNotice(null);
+    void (async () => {
+      setError(null);
+      try {
+        const result = await importPaper();
+        if (result === null) {
+          return;
+        }
+        if (result.duplicate) {
+          setSelectedId(result.paper.id);
+          setNotice('已在文献库中，已为你选中');
+        }
+      } catch (importError) {
+        setError(errorMessage(importError));
+      }
+    })();
   };
 
   const handleOpen = (paper: Paper): void => {
@@ -124,7 +140,18 @@ export function LibraryView({
 
   const handleAttach = (paper: Paper): void => {
     setOpenMenuId(null);
-    void runAction(() => attachTranslated(paper.id));
+    setNotice(null);
+    void (async () => {
+      setError(null);
+      try {
+        const updated = await attachTranslated(paper.id);
+        if (updated !== null && updated.storageDir === null) {
+          setNotice('该文献尚未托管，译本仍使用外部文件');
+        }
+      } catch (attachError) {
+        setError(errorMessage(attachError));
+      }
+    })();
   };
 
   const handleRelocate = (paper: Paper, version: 'original' | 'translated'): void => {
@@ -218,6 +245,15 @@ export function LibraryView({
           </button>
         </div>
       </header>
+
+      {notice !== null && (
+        <div className="library-page-error" role="status">
+          <span>{notice}</span>
+          <button type="button" className="menu-button" onClick={() => setNotice(null)}>
+            关闭
+          </button>
+        </div>
+      )}
 
       {error !== null && (
         <div className="library-error library-page-error" role="alert">

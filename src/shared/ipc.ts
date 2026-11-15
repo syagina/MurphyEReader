@@ -4,6 +4,7 @@ import type {
   ChatMessage,
   ChatSendRequest,
   Conversation,
+  ImportPaperResult,
   Note,
   NoteType,
   Paper,
@@ -15,7 +16,7 @@ export interface PaperLensApi {
   papers: {
     list(): Promise<Paper[]>;
     get(id: number): Promise<Paper | null>;
-    importOriginal(): Promise<Paper | null>;
+    importOriginal(): Promise<ImportPaperResult | null>;
     attachTranslated(id: number): Promise<Paper | null>;
     update(
       id: number,

@@ -48,6 +48,7 @@ app.whenReady().then(() => {
   registerIpcHandlers({
     db: database,
     secret,
+    documentsDir: app.getPath('documents'),
     emit: (channel, payload) => {
       const win = mainWindow;
       if (win !== null && !win.isDestroyed()) {
