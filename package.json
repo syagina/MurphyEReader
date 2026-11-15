@@ -2,6 +2,7 @@
   "name": "paperlens",
   "version": "0.1.0",
   "description": "PaperLens - an AI-powered desktop PDF reader",
+  "author": "PaperLens",
   "main": "./out/main/index.js",
   "private": true,
   "license": "MIT",
