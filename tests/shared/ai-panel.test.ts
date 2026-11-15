@@ -5,6 +5,7 @@ import {
   AI_PANEL_MIN_WIDTH,
   aiPanelMaxWidth,
   clampAiPanelWidth,
+  resizeAiPanelWidth,
 } from '@shared/ai-panel';
 
 describe('AI 面板宽度常量', () => {
@@ -57,5 +58,13 @@ describe('clampAiPanelWidth', () => {
   it('结果四舍五入为整数', () => {
     expect(clampAiPanelWidth(360.6, 1600)).toBe(361);
     expect(clampAiPanelWidth(400.4, 1600)).toBe(400);
+  });
+});
+
+describe('resizeAiPanelWidth', () => {
+  it('指针右移收窄、左移加宽，并夹紧在允许范围内', () => {
+    expect(resizeAiPanelWidth(360, 100, 1600)).toBe(320);
+    expect(resizeAiPanelWidth(360, -100, 1600)).toBe(460);
+    expect(resizeAiPanelWidth(880, -100, 1600)).toBe(900);
   });
 });

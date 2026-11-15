@@ -1,4 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
+import {
+  AI_PANEL_DEFAULT_WIDTH,
+  AI_PANEL_MIN_WIDTH,
+  aiPanelMaxWidth,
+  clampAiPanelWidth,
+  resizeAiPanelWidth,
+} from '@shared/ai-panel';
 import type { Paper, SearchResult } from '@shared/types';
 import { ChatPanel } from './components/ChatPanel';
 import { LibraryView } from './components/LibraryView';
@@ -10,6 +17,7 @@ import { SettingsDialog } from './components/SettingsDialog';
 import type { SettingsTab } from './components/SettingsDialog';
 import { TranslationStatusCard } from './components/TranslationStatusCard';
 import { errorMessage } from './lib/errors';
+import { useAppSettingsStore } from './stores/app-settings';
 import { useChatStore } from './stores/chat';
 import { useLibraryStore } from './stores/library';
 import { useNotesStore } from './stores/notes';
@@ -37,6 +45,12 @@ export default function App(): React.JSX.Element {
   const [libraryView, setLibraryView] = useState(true);
   const [outlineHidden, setOutlineHidden] = useState(false);
   const [aiCollapsed, setAiCollapsed] = useState(false);
+  // Docked AI panel width in px. Dragging updates it live; only the pointer-up
+  // (or keyboard/double-click) writes it through app settings.
+  const [aiWidth, setAiWidth] = useState(AI_PANEL_DEFAULT_WIDTH);
+  const [resizing, setResizing] = useState(false);
+  // Pointer origin of the active separator drag; null when not dragging.
+  const resizeStartRef = useRef<{ startX: number; startWidth: number } | null>(null);
   // Focus mode hides the top bar, library chrome and outline, and asks the
   // main process for a real full-screen window.
   const [focusMode, setFocusMode] = useState(false);
@@ -88,6 +102,32 @@ export default function App(): React.JSX.Element {
   // dialog is ever opened. The store records its own load errors.
   useEffect(() => {
     void useSettingsStore.getState().load();
+  }, []);
+
+  // Restore the persisted AI panel width once. Clamp it against the current
+  // window because it may have been saved on a wider screen; the store records
+  // its own load errors.
+  useEffect(() => {
+    void useAppSettingsStore
+      .getState()
+      .load()
+      .then(() => {
+        const settings = useAppSettingsStore.getState().settings;
+        if (settings !== null) {
+          setAiWidth(clampAiPanelWidth(settings.aiPanelWidth, window.innerWidth));
+        }
+      });
+  }, []);
+
+  // Shrinking the window can invalidate the current width. Re-clamp locally
+  // without persisting, so a temporarily small window never overwrites the
+  // width the reader chose on a larger screen.
+  useEffect(() => {
+    const handleResize = (): void => {
+      setAiWidth((width) => clampAiPanelWidth(width, window.innerWidth));
+    };
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
   }, []);
 
   // Subscribe to storage busy/migration events for the library banners and
@@ -184,6 +224,79 @@ export default function App(): React.JSX.Element {
     } else {
       enterFocusMode();
     }
+  };
+
+  // Persist a settled width; pointer movement itself never writes settings.
+  const persistAiWidth = (width: number): void => {
+    void useAppSettingsStore.getState().save({ aiPanelWidth: width }).catch(() => {
+      // The store exposes the failure; resizing must keep working regardless.
+    });
+  };
+
+  const resetAiWidth = (): void => {
+    const width = clampAiPanelWidth(AI_PANEL_DEFAULT_WIDTH, window.innerWidth);
+    setAiWidth(width);
+    persistAiWidth(width);
+  };
+
+  const handleResizerPointerDown = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    resizeStartRef.current = { startX: event.clientX, startWidth: aiWidth };
+    setResizing(true);
+  };
+
+  const handleResizerPointerMove = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const start = resizeStartRef.current;
+    if (start === null) {
+      return;
+    }
+    setAiWidth(
+      resizeAiPanelWidth(start.startWidth, event.clientX - start.startX, window.innerWidth),
+    );
+  };
+
+  const handleResizerPointerUp = (event: React.PointerEvent<HTMLDivElement>): void => {
+    const start = resizeStartRef.current;
+    if (start === null) {
+      return;
+    }
+    resizeStartRef.current = null;
+    setResizing(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    // Derive the saved width from the pointer-up position too, so it can never
+    // lag behind a batched final pointermove.
+    const width = resizeAiPanelWidth(
+      start.startWidth,
+      event.clientX - start.startX,
+      window.innerWidth,
+    );
+    setAiWidth(width);
+    persistAiWidth(width);
+  };
+
+  const handleResizerKeyDown = (event: React.KeyboardEvent<HTMLDivElement>): void => {
+    if (event.key === 'Home') {
+      event.preventDefault();
+      resetAiWidth();
+      return;
+    }
+    let width: number;
+    if (event.key === 'ArrowLeft') {
+      width = clampAiPanelWidth(aiWidth + 20, window.innerWidth);
+    } else if (event.key === 'ArrowRight') {
+      width = clampAiPanelWidth(aiWidth - 20, window.innerWidth);
+    } else {
+      return;
+    }
+    event.preventDefault();
+    setAiWidth(width);
+    persistAiWidth(width);
   };
 
   const handleOpenPaper = (paper: Paper): void => {
@@ -513,8 +626,31 @@ export default function App(): React.JSX.Element {
             </div>
           </main>
 
+          {/* Only the reader branch renders here, so expansion and focus mode
+              are the remaining conditions for a draggable separator. */}
+          {!aiCollapsed && !focusMode && (
+            <div
+              className="ai-resizer"
+              role="separator"
+              aria-orientation="vertical"
+              aria-label="调整 AI 面板宽度"
+              aria-valuenow={aiWidth}
+              aria-valuemin={AI_PANEL_MIN_WIDTH}
+              aria-valuemax={aiPanelMaxWidth(window.innerWidth)}
+              tabIndex={0}
+              onPointerDown={handleResizerPointerDown}
+              onPointerMove={handleResizerPointerMove}
+              onPointerUp={handleResizerPointerUp}
+              onKeyDown={handleResizerKeyDown}
+              onDoubleClick={resetAiWidth}
+            />
+          )}
+
           <aside
-            className={aiCollapsed ? 'ai-panel collapsed' : 'ai-panel'}
+            className={
+              aiCollapsed ? 'ai-panel collapsed' : resizing ? 'ai-panel resizing' : 'ai-panel'
+            }
+            style={aiCollapsed ? undefined : { width: aiWidth, flexBasis: aiWidth }}
             aria-label="AI 面板"
           >
             <div className="panel-bar">

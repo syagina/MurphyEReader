@@ -355,6 +355,34 @@ input:focus-visible {
   padding-left: 0;
 }
 
+/* Drag handle between the reading area and the AI panel. Its 6 px hit area
+   straddles the panel edge through negative margins, so adding it never
+   shifts the reading layout, and hover/focus only change paint. */
+.ai-resizer {
+  position: relative;
+  z-index: 1;
+  flex: 0 0 6px;
+  width: 6px;
+  margin: 0 -3px;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+}
+
+.ai-resizer:hover,
+.ai-resizer:focus-visible {
+  background: var(--accent-soft);
+  outline: none;
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* While dragging, width changes must track the pointer without easing and
+   without starting a text selection. */
+.ai-panel.resizing {
+  transition: none;
+  user-select: none;
+}
+
 .panel-bar {
   display: flex;
   flex: 0 0 auto;

@@ -15,3 +15,16 @@ export function clampAiPanelWidth(width: number, windowWidth: number): number {
     Math.min(aiPanelMaxWidth(windowWidth), Math.max(AI_PANEL_MIN_WIDTH, finite)),
   );
 }
+
+/**
+ * Width after dragging the panel separator by `deltaX` pointer pixels. The
+ * separator sits left of the panel, so moving the pointer right (positive
+ * delta) narrows the panel; moving left widens it.
+ */
+export function resizeAiPanelWidth(
+  startWidth: number,
+  deltaX: number,
+  windowWidth: number,
+): number {
+  return clampAiPanelWidth(startWidth - deltaX, windowWidth);
+}
