@@ -52,6 +52,15 @@ const api: PaperLensApi = {
   translate: {
     text: (input) => ipcRenderer.invoke('translate:text', input),
   },
+  translation: {
+    engineStatus: () => ipcRenderer.invoke('translation:engineStatus'),
+    chooseEnginePath: () => ipcRenderer.invoke('translation:chooseEnginePath'),
+    install: () => ipcRenderer.invoke('translation:install'),
+    warmup: () => ipcRenderer.invoke('translation:warmup'),
+    cancel: (jobId) => ipcRenderer.invoke('translation:cancel', jobId),
+    onToolProgress: (cb) => subscribe('tool:progress', cb),
+    onToolDone: (cb) => subscribe('tool:done', cb),
+  },
   notes: {
     list: (paperId) => ipcRenderer.invoke('notes:list', paperId),
     create: (input) => ipcRenderer.invoke('notes:create', input),

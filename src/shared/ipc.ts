@@ -6,6 +6,7 @@ import type {
   ChatMessage,
   ChatSendRequest,
   Conversation,
+  EngineActionResult,
   ExportContext,
   Folder,
   FolderImportSummary,
@@ -22,6 +23,9 @@ import type {
   SearchResult,
   SelectionTranslationResult,
   StorageInfo,
+  ToolDoneEvent,
+  ToolProgressEvent,
+  TranslationEngineStatus,
 } from './types';
 
 export interface PaperLensApi {
@@ -67,6 +71,16 @@ export interface PaperLensApi {
   translate: {
     /** Translates a free selection; nothing is persisted. */
     text(input: { text: string }): Promise<SelectionTranslationResult>;
+  };
+  translation: {
+    engineStatus(): Promise<TranslationEngineStatus>;
+    /** Asks for a BabelDOC executable; validation happens when saving. */
+    chooseEnginePath(): Promise<string | null>;
+    install(): Promise<EngineActionResult>;
+    warmup(): Promise<EngineActionResult>;
+    cancel(jobId: string): Promise<void>;
+    onToolProgress(cb: (event: ToolProgressEvent) => void): () => void;
+    onToolDone(cb: (event: ToolDoneEvent) => void): () => void;
   };
   notes: {
     list(paperId?: number): Promise<Note[]>;

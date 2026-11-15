@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
 import { useAppSettingsStore } from '../stores/app-settings';
 import { AiSettingsTab } from './settings/AiSettingsTab';
+import { EngineSettingsTab } from './settings/EngineSettingsTab';
 import { LibrarySettingsTab } from './settings/LibrarySettingsTab';
 
-export type SettingsTab = 'ai' | 'library';
+export type SettingsTab = 'ai' | 'library' | 'engine';
 
 export interface SettingsDialogProps {
   onClose(): void;
@@ -13,6 +14,7 @@ export interface SettingsDialogProps {
 const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: 'ai', label: 'AI 接口' },
   { id: 'library', label: '文献库' },
+  { id: 'engine', label: '翻译引擎' },
 ];
 
 const SHORTCUTS: Array<{ keys: string; label: string }> = [
@@ -23,8 +25,8 @@ const SHORTCUTS: Array<{ keys: string; label: string }> = [
 ];
 
 /**
- * Modal settings shell. Both tab panels stay mounted and only the inactive
- * one is hidden, so an unsaved AI draft survives switching tabs. Escape and a
+ * Modal settings shell. All tab panels stay mounted and only the inactive ones
+ * are hidden, so an unsaved AI draft survives switching tabs. Escape and a
  * backdrop click close the whole dialog; the shortcut list is shared.
  */
 export function SettingsDialog({
@@ -88,6 +90,15 @@ export function SettingsDialog({
           hidden={tab !== 'library'}
         >
           <LibrarySettingsTab />
+        </div>
+
+        <div
+          className="settings-panel"
+          role="tabpanel"
+          aria-label="翻译引擎"
+          hidden={tab !== 'engine'}
+        >
+          <EngineSettingsTab />
         </div>
 
         <section className="settings-shortcuts" aria-label="快捷键">

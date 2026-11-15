@@ -2992,6 +2992,84 @@ input:focus-visible {
   text-align: center;
 }
 
+.settings-engine {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-engine-state {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.settings-engine-state.ok {
+  color: #147a4b;
+}
+
+.settings-engine-path {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+}
+
+.settings-engine-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.settings-engine-actions .menu-button {
+  padding: 6px 12px;
+  text-align: center;
+}
+
+.settings-engine-instructions {
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  color: var(--text);
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+  user-select: text;
+}
+
+.settings-engine-logs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.settings-engine-heading {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.settings-engine-log {
+  max-height: 180px;
+  margin: 0;
+  padding: 8px 10px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+  color: var(--text);
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 11px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 /* Full-window region capture overlay */
 .region-capture {
   position: fixed;

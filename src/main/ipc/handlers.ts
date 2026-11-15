@@ -42,6 +42,8 @@ import { PaperLibrary } from '../storage/library-service';
 import { isCanonicalStorageDir } from '../storage/paths';
 import { changeLibraryRoot } from '../storage/root-change';
 import { readStorageInfo } from '../storage/storage-info';
+import { BabeldocService } from '../tools/babeldoc-service';
+import { ToolJobRunner } from '../tools/job-runner';
 
 export interface HandlerDeps {
   db: Database.Database;
@@ -134,12 +136,23 @@ export async function toLoadPayload(
 
 export function registerIpcHandlers(deps: HandlerDeps): {
   jobs: JobRegistry;
+  runner: ToolJobRunner;
+  babeldoc: BabeldocService;
   startStorageMigration(): Promise<void>;
 } {
   const { db, secret, emit } = deps;
   const jobs = new JobRegistry((state) => {
     emit('storage:busy', state);
     emit('translation:state', state);
+  });
+  // One runner owns every external tool process; Task 13 reuses it.
+  const runner = new ToolJobRunner(emit);
+  const babeldoc = new BabeldocService({
+    jobs,
+    runner,
+    emit,
+    getStored: () => getStoredAppSettings(db, deps.documentsDir),
+    setBabeldocPath: (path) => setStoredAppSettings(db, { babeldocPath: path }),
   });
   const libraryRoot = (): string =>
     getStoredAppSettings(db, deps.documentsDir).libraryRoot;
@@ -182,11 +195,10 @@ export function registerIpcHandlers(deps: HandlerDeps): {
     getRoot: libraryRoot,
     emit,
   });
-  // Task 12 replaces the detected engine path with a real probe; until then
-  // the field is present but empty.
-  const readAppSettings = (): AppSettings => ({
+  // Detection runs a real 10-second `--help` probe per existing candidate.
+  const readAppSettings = async (): Promise<AppSettings> => ({
     ...getStoredAppSettings(db, deps.documentsDir),
-    babeldocDetectedPath: null,
+    babeldocDetectedPath: await babeldoc.detect(),
   });
   const pdfExporter = new PdfExporter({
     preloadPath: join(__dirname, '../preload/index.js'),
@@ -381,6 +393,28 @@ export function registerIpcHandlers(deps: HandlerDeps): {
         { text: typeof input?.text === 'string' ? input.text : '' },
       ),
   );
+
+  electron.ipcMain.handle('translation:engineStatus', () => babeldoc.getStatus());
+
+  electron.ipcMain.handle('translation:chooseEnginePath', async () => {
+    const result = await electron.dialog.showOpenDialog({
+      filters: [{ name: '翻译引擎', extensions: ['exe', 'cmd', 'bat'] }],
+      properties: ['openFile'],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return result.filePaths[0];
+  });
+
+  electron.ipcMain.handle('translation:install', () => babeldoc.install());
+
+  electron.ipcMain.handle('translation:warmup', () => babeldoc.warmup());
+
+  // Task 13 routes a matching jobId to the paper-translation job first.
+  electron.ipcMain.handle('translation:cancel', (_event, jobId: string) => {
+    babeldoc.cancel(jobId);
+  });
 
   electron.ipcMain.handle('notes:list', (_event, paperId?: number) => listNotes(db, paperId));
 
@@ -605,13 +639,20 @@ export function registerIpcHandlers(deps: HandlerDeps): {
 
   electron.ipcMain.handle('appSettings:get', () => readAppSettings());
 
-  electron.ipcMain.handle('appSettings:update', (_event, patch: AppSettingsUpdate) => {
+  electron.ipcMain.handle('appSettings:update', async (_event, patch: AppSettingsUpdate) => {
+    // A custom engine path must run before it is stored; clearing stays free.
+    const requested = patch.babeldocPath;
+    if (typeof requested === 'string' && requested.trim() !== '') {
+      await babeldoc.validate(requested.trim());
+    }
     setStoredAppSettings(db, patch);
     return readAppSettings();
   });
 
   return {
     jobs,
+    runner,
+    babeldoc,
     async startStorageMigration(): Promise<void> {
       try {
         await runStorageMigration();

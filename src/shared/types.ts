@@ -252,6 +252,21 @@ export interface StorageInfo {
   error: string | null;
 }
 
+/** Translation engine state shown by the settings tab and engine status calls. */
+export interface TranslationEngineStatus {
+  detectedPath: string | null;
+  configuredPath: string;
+  uvPath: string | null;
+  busy: boolean;
+}
+
+/** Outcome of asking the main process to install or warm up the engine. */
+export interface EngineActionResult {
+  started: boolean;
+  jobId: string | null;
+  instructions: string | null;
+}
+
 export interface ToolProgressEvent {
   jobId: string;
   kind: ToolTask;
