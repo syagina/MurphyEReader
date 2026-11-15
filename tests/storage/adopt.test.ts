@@ -142,6 +142,30 @@ describe('adoptUnmanagedPaper', () => {
     expect(existsSync(join(root, canonicalStorageDir(paper.id, paper.title)))).toBe(false);
   });
 
+  it('ignoreMissingTranslation 时缺失译本不阻塞收养也不复制', async () => {
+    const original = makeExternal('legacy.pdf', SAMPLE_TEXT_PDF);
+    const missingTranslation = join(tempDir, 'gone.pdf');
+    const paper = createPaper(
+      db,
+      makeInput({
+        title: '忽略缺译本',
+        filePathOriginal: original,
+        filePathTranslated: missingTranslation,
+      }),
+    );
+
+    const adopted = await adoptUnmanagedPaper(db, root, paper, {
+      ignoreMissingTranslation: true,
+    });
+
+    expect(adopted.storageDir).toBe(canonicalStorageDir(paper.id, '忽略缺译本'));
+    expect(existsSync(storageFile(root, adopted.storageDir!, ORIGINAL_PDF_NAME))).toBe(true);
+    expect(existsSync(storageFile(root, adopted.storageDir!, CUSTOM_TRANSLATED_NAME))).toBe(
+      false,
+    );
+    expect(adopted.filePathTranslated).toBe(missingTranslation);
+  });
+
   it('原文缺失时报原文文件不存在且不改变行', async () => {
     const paper = createPaper(db, makeInput({ filePathOriginal: join(tempDir, 'gone.pdf') }));
 

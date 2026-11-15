@@ -198,6 +198,7 @@ describe('PaperLibrary.attachTranslated', () => {
   it('已托管文献把译本复制为 translated.custom.pdf', async () => {
     const library = makeLibrary();
     const imported = await library.importPaper(SAMPLE_TEXT_PDF);
+    const pagesBefore = getPages(db, imported.paper.id);
 
     const attached = await library.attachTranslated(imported.paper.id, SAMPLE_SCANNED_PDF);
 
@@ -208,6 +209,39 @@ describe('PaperLibrary.attachTranslated', () => {
     expect(attached.filePathOriginal).toBe(imported.paper.filePathOriginal);
     expect(existsSync(attached.filePathTranslated!)).toBe(true);
     expect(existsSync(SAMPLE_SCANNED_PDF)).toBe(true);
+    expect(getPages(db, imported.paper.id)).toEqual(pagesBefore);
+    expect(attached.hasTextLayer).toBe(imported.paper.hasTextLayer);
+    expect(attached.pageCountOriginal).toBe(imported.paper.pageCountOriginal);
+  });
+
+  it('未托管且绑定译本缺失时，绑定新译本会收养文献并替换译本', async () => {
+    const external = join(tempDir, 'legacy.pdf');
+    copyFileSync(SAMPLE_TEXT_PDF, external);
+    const paper = createPaper(
+      db,
+      makeInput({
+        title: '缺译本',
+        filePathOriginal: external,
+        filePathTranslated: join(tempDir, 'gone-zh.pdf'),
+      }),
+    );
+    const library = makeLibrary();
+
+    const attached = await library.attachTranslated(paper.id, SAMPLE_SCANNED_PDF);
+
+    expect(attached.storageDir).toBe(canonicalStorageDir(paper.id, '缺译本'));
+    expect(attached.filePathOriginal).toBe(
+      storageFile(root, attached.storageDir!, ORIGINAL_PDF_NAME),
+    );
+    const managedTranslation = storageFile(
+      root,
+      attached.storageDir!,
+      CUSTOM_TRANSLATED_NAME,
+    );
+    expect(attached.filePathTranslated).toBe(managedTranslation);
+    expect(existsSync(managedTranslation)).toBe(true);
+    expect(readFileSync(managedTranslation).equals(readFileSync(SAMPLE_SCANNED_PDF))).toBe(true);
+    expect(existsSync(external)).toBe(true);
   });
 
   it('源文件已是目标译本文件时不自我复制', async () => {

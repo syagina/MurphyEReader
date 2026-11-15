@@ -94,10 +94,10 @@ export class PaperLibrary {
   }
 
   /**
-   * Import without acquiring the storage lease. Internal callers (folder
-   * import) must already hold it; everything else should use `importPaper`.
+   * Import without acquiring the storage lease. Private: folder import lives
+   * on this class and calls it while holding the `'importFolder'` lease.
    */
-  async importPaperLocked(sourcePath: string): Promise<ImportPaperResult> {
+  private async importPaperLocked(sourcePath: string): Promise<ImportPaperResult> {
     const root = this.getRoot();
 
     try {
@@ -195,7 +195,11 @@ export class PaperLibrary {
         });
       }
 
-      const adopted = await adoptUnmanagedPaper(this.db, root, paper);
+      // The selected file replaces any previously bound translation, so a
+      // missing old binding must not block adopting the paper.
+      const adopted = await adoptUnmanagedPaper(this.db, root, paper, {
+        ignoreMissingTranslation: true,
+      });
       const target = storageFile(root, adopted.storageDir!, CUSTOM_TRANSLATED_NAME);
       if (!samePath(sourcePath, target)) {
         await this.copyTranslation(sourcePath, target);

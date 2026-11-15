@@ -15,6 +15,12 @@ import {
 export interface AdoptUnmanagedOptions {
   /** Precomputed SHA-256; when supplied the file is not hashed again. */
   hash?: string;
+  /**
+   * When true, a bound translation whose file is missing is neither copied
+   * nor treated as an error. Callers that immediately replace the translation
+   * (attach) use this so a stale binding cannot block adoption.
+   */
+  ignoreMissingTranslation?: boolean;
 }
 
 const ALREADY_MANAGED_MESSAGE = '文献已托管，无需整理';
@@ -58,7 +64,8 @@ export async function adoptUnmanagedPaper(
     throw new Error(ORIGINAL_MISSING_MESSAGE);
   }
   const translationBound = isBoundTranslation(paper);
-  if (translationBound && !existsSync(paper.filePathTranslated)) {
+  const translationMissing = translationBound && !existsSync(paper.filePathTranslated);
+  if (translationMissing && options.ignoreMissingTranslation !== true) {
     throw new Error(TRANSLATION_MISSING_MESSAGE);
   }
 
@@ -88,7 +95,7 @@ export async function adoptUnmanagedPaper(
   }
 
   let filePathTranslated = paper.filePathTranslated;
-  if (translationBound) {
+  if (translationBound && !translationMissing) {
     const translationTarget = join(folder, CUSTOM_TRANSLATED_NAME);
     if (!samePath(paper.filePathTranslated, translationTarget)) {
       try {
