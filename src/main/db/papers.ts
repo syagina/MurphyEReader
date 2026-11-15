@@ -11,6 +11,9 @@ export interface NewPaperInput {
   pageCountTranslated: number | null;
   hasTextLayer: boolean;
   outline: OutlineNode[];
+  folderId: number | null;
+  storageDir: string | null;
+  fileHash: string | null;
 }
 
 const PATCH_COLUMNS = {
@@ -26,6 +29,9 @@ const PATCH_COLUMNS = {
   pageCountTranslated: 'page_count_translated',
   outline: 'outline_json',
   hasTextLayer: 'has_text_layer',
+  folderId: 'folder_id',
+  storageDir: 'storage_dir',
+  fileHash: 'file_hash',
 } as const;
 
 type PatchKey = keyof typeof PATCH_COLUMNS;
@@ -46,6 +52,9 @@ interface PaperRow {
   last_page_translated: number;
   added_at: number;
   last_read_at: number | null;
+  folder_id: number | null;
+  storage_dir: string | null;
+  file_hash: string | null;
 }
 
 function mapRow(row: PaperRow): Paper {
@@ -61,6 +70,9 @@ function mapRow(row: PaperRow): Paper {
     hasTextLayer: row.has_text_layer === 1,
     outline: JSON.parse(row.outline_json) as OutlineNode[],
     tags: JSON.parse(row.tags_json) as string[],
+    folderId: row.folder_id,
+    storageDir: row.storage_dir,
+    fileHash: row.file_hash,
     lastPageOriginal: row.last_page_original,
     lastPageTranslated: row.last_page_translated,
     addedAt: row.added_at,
@@ -74,8 +86,8 @@ export function createPaper(db: Database.Database, input: NewPaperInput): Paper 
       `INSERT INTO papers (
         title, authors, year, file_path_original, file_path_translated,
         page_count_original, page_count_translated, has_text_layer,
-        outline_json, added_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        outline_json, folder_id, storage_dir, file_hash, added_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     )
     .run(
       input.title,
@@ -87,6 +99,9 @@ export function createPaper(db: Database.Database, input: NewPaperInput): Paper 
       input.pageCountTranslated,
       input.hasTextLayer ? 1 : 0,
       JSON.stringify(input.outline),
+      input.folderId,
+      input.storageDir,
+      input.fileHash,
       Date.now(),
     );
 
@@ -112,6 +127,19 @@ export function getPaper(db: Database.Database, id: number): Paper | null {
   return row ? mapRow(row) : null;
 }
 
+export function findPaperByHash(
+  db: Database.Database,
+  hash: string,
+  excludeId?: number,
+): Paper | null {
+  const row = db
+    .prepare(
+      'SELECT * FROM papers WHERE file_hash = ? AND id != ? ORDER BY id LIMIT 1',
+    )
+    .get(hash, excludeId ?? -1) as PaperRow | undefined;
+  return row ? mapRow(row) : null;
+}
+
 export function updatePaper(
   db: Database.Database,
   id: number,
@@ -130,6 +158,9 @@ export function updatePaper(
       | 'pageCountTranslated'
       | 'outline'
       | 'hasTextLayer'
+      | 'folderId'
+      | 'storageDir'
+      | 'fileHash'
     >
   >,
 ): Paper {

@@ -25,13 +25,21 @@ describe('openDb 初始化数据库', () => {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
       .all() as { name: string }[];
     expect(tables.map((table) => table.name)).toEqual(
-      expect.arrayContaining(['papers', 'pages', 'conversations', 'messages', 'notes', 'settings']),
+      expect.arrayContaining(['papers', 'pages', 'conversations', 'messages', 'notes', 'settings', 'folders']),
     );
   });
 
   it('将 PRAGMA user_version 设为 SCHEMA_VERSION', () => {
-    expect(SCHEMA_VERSION).toBe(1);
+    expect(SCHEMA_VERSION).toBe(2);
     expect(db.pragma('user_version', { simple: true })).toBe(SCHEMA_VERSION);
+  });
+
+  it('papers 表包含 v2 托管字段', () => {
+    const columns = db.prepare("PRAGMA table_info('papers')").all() as { name: string }[];
+
+    expect(columns.map((column) => column.name)).toEqual(
+      expect.arrayContaining(['folder_id', 'file_hash', 'storage_dir']),
+    );
   });
 
   it('开启外键约束', () => {

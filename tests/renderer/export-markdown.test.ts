@@ -24,6 +24,9 @@ function makePaper(overrides: Partial<Paper> = {}): Paper {
     lastPageTranslated: 1,
     addedAt: 1_000,
     lastReadAt: null,
+    folderId: null,
+    storageDir: null,
+    fileHash: null,
     ...overrides,
   };
 }

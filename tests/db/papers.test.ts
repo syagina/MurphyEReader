@@ -4,9 +4,11 @@ import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '@main/db';
+import { createFolder } from '@main/db/folders';
 import {
   createPaper,
   deletePaper,
+  findPaperByHash,
   getPaper,
   listPapers,
   markRead,
@@ -35,6 +37,9 @@ function makeInput(overrides: Partial<NewPaperInput> = {}): NewPaperInput {
     pageCountTranslated: null,
     hasTextLayer: true,
     outline: sampleOutline,
+    folderId: null,
+    storageDir: null,
+    fileHash: null,
     ...overrides,
   };
 }
@@ -76,6 +81,9 @@ describe('createPaper', () => {
       lastPageOriginal: 1,
       lastPageTranslated: 1,
       lastReadAt: null,
+      folderId: null,
+      storageDir: null,
+      fileHash: null,
     });
     expect(paper.id).toBeGreaterThan(0);
     expect(paper.addedAt).toBeGreaterThanOrEqual(before);
@@ -105,6 +113,85 @@ describe('createPaper', () => {
     const { id } = createPaper(db, makeInput());
 
     expect(getPaper(db, id)?.outline).toEqual(sampleOutline);
+  });
+});
+
+describe('托管字段', () => {
+  it('createPaper 保存 folderId、fileHash、storageDir 并可读回', () => {
+    const folder = createFolder(db, '毕业论文');
+    const created = createPaper(
+      db,
+      makeInput({
+        folderId: folder.id,
+        fileHash: 'c'.repeat(64),
+        storageDir: 'papers/有限元方法导论 (1)',
+      }),
+    );
+
+    expect(created).toMatchObject({
+      folderId: folder.id,
+      fileHash: 'c'.repeat(64),
+      storageDir: 'papers/有限元方法导论 (1)',
+    });
+    expect(getPaper(db, created.id)).toEqual(created);
+  });
+
+  it('updatePaper 可更新三个托管字段', () => {
+    const folder = createFolder(db, '已收录');
+    const { id } = createPaper(db, makeInput());
+
+    const updated = updatePaper(db, id, {
+      folderId: folder.id,
+      fileHash: 'f'.repeat(64),
+      storageDir: 'papers/有限元方法导论 (1)',
+    });
+
+    expect(updated).toMatchObject({
+      folderId: folder.id,
+      fileHash: 'f'.repeat(64),
+      storageDir: 'papers/有限元方法导论 (1)',
+    });
+    expect(getPaper(db, id)).toEqual(updated);
+  });
+
+  it('updatePaper 可将三个托管字段清空', () => {
+    const folder = createFolder(db, '待清空');
+    const paper = createPaper(
+      db,
+      makeInput({ folderId: folder.id, fileHash: 'abc', storageDir: 'papers/x (1)' }),
+    );
+
+    const updated = updatePaper(db, paper.id, {
+      folderId: null,
+      fileHash: null,
+      storageDir: null,
+    });
+
+    expect(updated).toMatchObject({ folderId: null, fileHash: null, storageDir: null });
+    expect(getPaper(db, paper.id)).toEqual(updated);
+  });
+});
+
+describe('findPaperByHash', () => {
+  it('按哈希查找并返回 id 最小的文献', () => {
+    const first = createPaper(db, makeInput({ title: '第一篇', fileHash: 'same-hash' }));
+    createPaper(db, makeInput({ title: '第二篇', fileHash: 'same-hash' }));
+
+    expect(findPaperByHash(db, 'same-hash')?.id).toBe(first.id);
+  });
+
+  it('excludeId 排除指定文献后继续查找', () => {
+    const first = createPaper(db, makeInput({ fileHash: 'same-hash' }));
+    const second = createPaper(db, makeInput({ title: '第二篇', fileHash: 'same-hash' }));
+
+    expect(findPaperByHash(db, 'same-hash', first.id)?.id).toBe(second.id);
+    expect(findPaperByHash(db, 'same-hash', second.id)?.id).toBe(first.id);
+  });
+
+  it('无匹配哈希或哈希为 NULL 的文献不返回', () => {
+    createPaper(db, makeInput());
+
+    expect(findPaperByHash(db, 'missing-hash')).toBeNull();
   });
 });
 

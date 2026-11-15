@@ -96,6 +96,9 @@ function setupPaper(
     pageCountTranslated: null,
     hasTextLayer: true,
     outline: [],
+    folderId: null,
+    storageDir: null,
+    fileHash: null,
   });
   replacePages(db, paper.id, pages);
   const conversation = createConversation(db, paper.id, '测试会话');

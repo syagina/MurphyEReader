@@ -21,6 +21,9 @@ export async function importPaper(
     pageCountTranslated: null,
     hasTextLayer: extracted.hasTextLayer,
     outline: extracted.outline,
+    folderId: null,
+    storageDir: null,
+    fileHash: null,
   });
 
   replacePages(db, paper.id, extracted.pages);

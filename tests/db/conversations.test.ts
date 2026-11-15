@@ -43,6 +43,9 @@ function makePaper(title = '测试论文'): Paper {
     pageCountTranslated: null,
     hasTextLayer: true,
     outline: [],
+    folderId: null,
+    storageDir: null,
+    fileHash: null,
   });
 }
 

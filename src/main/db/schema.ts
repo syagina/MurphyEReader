@@ -1,8 +1,8 @@
 import type Database from 'better-sqlite3';
 
-export const SCHEMA_VERSION = 1;
+export const SCHEMA_VERSION = 2;
 
-const MIGRATION_V1 = `
+export const MIGRATION_V1 = `
 CREATE TABLE papers (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   title TEXT NOT NULL, authors TEXT NOT NULL DEFAULT '', year INTEGER,
@@ -42,6 +42,20 @@ CREATE TABLE notes (
 );
 CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 PRAGMA user_version = 1;
+`;
+
+export const MIGRATION_V2 = `
+CREATE TABLE IF NOT EXISTS folders (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL COLLATE NOCASE UNIQUE,
+  created_at TEXT NOT NULL
+);
+
+ALTER TABLE papers ADD COLUMN folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL;
+ALTER TABLE papers ADD COLUMN file_hash TEXT;
+ALTER TABLE papers ADD COLUMN storage_dir TEXT;
+CREATE INDEX IF NOT EXISTS idx_papers_folder ON papers(folder_id);
+CREATE INDEX IF NOT EXISTS idx_papers_hash ON papers(file_hash);
 `;
 
 interface FtsTable {
@@ -135,6 +149,10 @@ export function migrate(db: Database.Database): void {
     const userVersion = db.pragma('user_version', { simple: true }) as number;
     if (userVersion < 1) {
       db.exec(MIGRATION_V1);
+    }
+    if (userVersion < 2) {
+      db.exec(MIGRATION_V2);
+      db.pragma('user_version = 2');
     }
     ensureFtsObjects(db);
   })();

@@ -52,6 +52,9 @@ function makePaper(title = '测试论文', tags: string[] = []): Paper {
     pageCountTranslated: null,
     hasTextLayer: true,
     outline: [],
+    folderId: null,
+    storageDir: null,
+    fileHash: null,
   });
   return tags.length === 0 ? paper : updatePaper(db, paper.id, { tags });
 }

@@ -25,6 +25,9 @@ export interface Paper {
   hasTextLayer: boolean;
   outline: OutlineNode[];
   tags: string[];
+  folderId: number | null;
+  storageDir: string | null;
+  fileHash: string | null;
   lastPageOriginal: number;
   lastPageTranslated: number;
   addedAt: number;

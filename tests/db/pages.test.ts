@@ -30,6 +30,9 @@ beforeEach(() => {
     pageCountTranslated: null,
     hasTextLayer: true,
     outline: [],
+    folderId: null,
+    storageDir: null,
+    fileHash: null,
   }).id;
 });
 
@@ -82,6 +85,9 @@ describe('replacePages', () => {
       pageCountTranslated: null,
       hasTextLayer: true,
       outline: [],
+      folderId: null,
+      storageDir: null,
+      fileHash: null,
     }).id;
 
     replacePages(db, paperId, samplePages);

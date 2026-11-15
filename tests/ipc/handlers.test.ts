@@ -22,6 +22,9 @@ function makeInput(overrides: Partial<NewPaperInput> = {}): NewPaperInput {
     pageCountTranslated: null,
     hasTextLayer: true,
     outline: [],
+    folderId: null,
+    storageDir: null,
+    fileHash: null,
     ...overrides,
   };
 }

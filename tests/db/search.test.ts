@@ -36,6 +36,9 @@ beforeEach(() => {
     pageCountTranslated: null,
     hasTextLayer: true,
     outline: [],
+    folderId: null,
+    storageDir: null,
+    fileHash: null,
   });
 
   replacePages(db, paper.id, [{ pageNo: 1, text: PAGE_TEXT }]);
