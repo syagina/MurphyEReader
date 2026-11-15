@@ -305,9 +305,10 @@ export class PaperLibrary {
   }
 
   /**
-   * Guarantees a managed, canonical folder for the paper. Adoption inside an
-   * already-held storage lease runs directly; only the outermost call takes a
-   * short `ensureManaged` lease.
+   * Guarantees a managed, canonical folder for the paper. Only this service's
+   * own re-entrant `ensureManaged` marker means the call is already nested
+   * inside the adoption lease; every other held storage marker must stay
+   * mutually exclusive and surface the standard busy error.
    */
   async ensureManaged(paperId: number): Promise<Paper> {
     const paper = this.requirePaper(paperId);
@@ -318,16 +319,15 @@ export class PaperLibrary {
       return paper;
     }
 
-    const outermost = this.jobs.getState().storageTask === null;
-    if (outermost) {
-      this.jobs.tryAcquireStorage('ensureManaged', paperId);
+    if (this.jobs.getState().storageTask === 'ensureManaged') {
+      return await adoptUnmanagedPaper(this.db, this.getRoot(), paper);
     }
+
+    this.jobs.tryAcquireStorage('ensureManaged');
     try {
       return await adoptUnmanagedPaper(this.db, this.getRoot(), paper);
     } finally {
-      if (outermost) {
-        this.jobs.releaseStorage();
-      }
+      this.jobs.releaseStorage();
     }
   }
 

@@ -539,17 +539,47 @@ describe('PaperLibrary.ensureManaged', () => {
     expect(jobs.getState().storageTask).toBeNull();
   });
 
-  it('已有存储租约时不再嵌套获取', async () => {
+  it('其他存储任务持锁时收养报忙，保持未托管且不建文件夹', async () => {
     const external = join(tempDir, 'legacy.pdf');
     copyFileSync(SAMPLE_TEXT_PDF, external);
     const paper = createPaper(db, makeInput({ filePathOriginal: external }));
     const library = makeLibrary();
-    jobs.tryAcquireStorage('changeRoot');
+    jobs.tryAcquireStorage('import');
 
-    const adopted = await library.ensureManaged(paper.id);
+    try {
+      await expect(library.ensureManaged(paper.id)).rejects.toThrow(BUSY);
+      expect(jobs.getState().storageTask).toBe('import');
+      expect(getPaper(db, paper.id)?.storageDir).toBeNull();
+      expect(existsSync(join(root, canonicalStorageDir(paper.id, paper.title)))).toBe(false);
+    } finally {
+      jobs.releaseStorage();
+    }
+  });
 
-    expect(adopted.storageDir).not.toBeNull();
-    expect(jobs.getState().storageTask).toBe('changeRoot');
-    jobs.releaseStorage();
+  it('本服务已持有的 ensureManaged 租约视为重入，不释放外层标记', async () => {
+    const external = join(tempDir, 'legacy.pdf');
+    copyFileSync(SAMPLE_TEXT_PDF, external);
+    const paper = createPaper(db, makeInput({ filePathOriginal: external }));
+    const library = makeLibrary();
+    jobs.tryAcquireStorage('ensureManaged');
+
+    try {
+      const adopted = await library.ensureManaged(paper.id);
+
+      expect(adopted.storageDir).toBe(canonicalStorageDir(paper.id, paper.title));
+      expect(jobs.getState().storageTask).toBe('ensureManaged');
+    } finally {
+      jobs.releaseStorage();
+    }
+  });
+
+  it('收养失败时释放 ensureManaged 租约', async () => {
+    const paper = createPaper(db, makeInput({ filePathOriginal: join(tempDir, 'gone.pdf') }));
+    const library = makeLibrary();
+
+    await expect(library.ensureManaged(paper.id)).rejects.toThrow('原文文件不存在');
+
+    expect(jobs.getState().storageTask).toBeNull();
+    expect(getPaper(db, paper.id)?.storageDir).toBeNull();
   });
 });
