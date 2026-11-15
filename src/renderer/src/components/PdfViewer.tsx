@@ -846,7 +846,7 @@ export function PdfViewer({
           >
             选框提问
           </button>
-          {!translationBound && (
+          {(paperTranslating || !translationBound) && (
             <button
               type="button"
               className="pdf-toolbar-button"
