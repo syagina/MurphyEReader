@@ -1311,10 +1311,11 @@ input:focus-visible {
 
 .notes-toolbar-actions {
   display: flex;
-  flex: 1 1 auto;
+  flex: 1 1 100%;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 6px;
+  min-width: 0;
 }
 
 .notes-toolbar-actions .menu-button {
@@ -2583,4 +2584,281 @@ input:focus-visible {
 .chat-image-chip button:hover {
   background: var(--bg-hover);
   color: var(--text);
+}
+
+/* AI answer → note capture */
+.chat-message-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 4px;
+}
+
+.chat-note-button {
+  padding: 2px 8px;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+  opacity: 0.72;
+}
+
+.chat-message:hover .chat-note-button,
+.chat-note-button:focus-visible {
+  opacity: 1;
+}
+
+.chat-note-button:hover {
+  border-color: #cdd9fb;
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.chat-selection-popup {
+  position: fixed;
+  z-index: 90;
+  padding: 3px;
+  border: 1px solid var(--border-strong);
+  border-radius: 7px;
+  background: var(--bg-panel);
+  box-shadow: 0 8px 22px rgb(15 23 42 / 0.2);
+  transform: translate(-50%, -100%);
+}
+
+.chat-selection-popup.below {
+  transform: translate(-50%, 0);
+}
+
+.chat-selection-popup button {
+  padding: 5px 12px;
+  border: none;
+  border-radius: 5px;
+  background: var(--accent);
+  color: #ffffff;
+  font-size: 12px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.chat-selection-popup button:hover {
+  background: var(--accent-hover);
+}
+
+.chat-note-notice {
+  display: flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 10px 0;
+  padding: 7px 10px;
+  border: 1px solid #b7e3cd;
+  border-radius: var(--radius);
+  background: #eefaf3;
+  color: #146c43;
+  font-size: 12px;
+}
+
+.chat-note-notice > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.chat-note-notice .menu-button {
+  flex: 0 0 auto;
+  padding: 3px 8px;
+  color: #146c43;
+}
+
+.chat-note-notice-close {
+  flex: 0 0 auto;
+  padding: 0 2px;
+  border: none;
+  background: transparent;
+  color: #146c43;
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.chat-note-dialog {
+  width: min(620px, 100%);
+}
+
+.chat-note-source {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.chat-note-targets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  font-size: 13px;
+}
+
+.chat-note-radio {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+}
+
+.chat-note-radio.disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.chat-note-append-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.chat-note-preview-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+}
+
+.chat-note-preview-label {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.chat-note-preview {
+  max-height: 220px;
+  padding: 8px 10px;
+  overflow-y: auto;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-subtle);
+}
+
+.chat-note-preview .markdown-view {
+  font-size: 12px;
+}
+
+/* Notes export controls */
+.notes-export-format,
+.note-export-format {
+  padding: 5px 6px;
+  border: 1px solid var(--border-strong);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.note-export-format {
+  padding: 4px 6px;
+}
+
+.note-editor-actions {
+  flex-wrap: wrap;
+}
+
+.note-editor-left-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+/* Hidden-window document used for PDF export */
+body.export-body {
+  overflow: auto;
+  background: #ffffff;
+}
+
+body.export-body #root {
+  height: auto;
+  min-height: 100%;
+}
+
+.export-loading,
+.export-error {
+  padding: 24px;
+  color: #4b5563;
+  font-size: 14px;
+}
+
+.export-error {
+  color: var(--danger);
+}
+
+.export-document {
+  width: 100%;
+  padding: 0 2px;
+  background: #ffffff;
+  color: #1f2329;
+}
+
+body.export-body .export-document .markdown-view {
+  font-size: 14px;
+  line-height: 1.72;
+}
+
+body.export-body .export-document .markdown-heading {
+  margin: 16px 0 8px;
+  font-size: 17px;
+  line-height: 1.45;
+}
+
+body.export-body .export-document h1.markdown-heading {
+  margin-top: 0;
+  font-size: 23px;
+}
+
+body.export-body .export-document h2.markdown-heading {
+  font-size: 19px;
+}
+
+body.export-body .export-document .markdown-math-block {
+  padding: 4px 0;
+  overflow: visible;
+  background: transparent;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+body.export-body .export-document .markdown-code {
+  white-space: pre-wrap;
+  background: #f3f4f6;
+  break-inside: avoid;
+  page-break-inside: avoid;
+}
+
+body.export-body .export-document .markdown-list {
+  margin: 0 0 10px;
+}
+
+@media print {
+  body.export-body {
+    overflow: visible;
+    background: #ffffff;
+  }
+
+  .export-document {
+    padding: 0;
+  }
+
+  .markdown-heading {
+    break-after: avoid;
+    page-break-after: avoid;
+  }
+
+  .markdown-view p,
+  .markdown-list li {
+    orphans: 3;
+    widows: 3;
+  }
 }

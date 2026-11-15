@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
-import type { Paper } from '@shared/types';
+import type { ChatMessage, Note, Paper } from '@shared/types';
+import { findAssistantSourcePage, suggestAiNoteTitle } from '../lib/chat-note';
 import { errorMessage } from '../lib/errors';
+import { readAssistantSelection } from '../lib/selection-markdown';
 import { useChatStore } from '../stores/chat';
 import { useReaderStore } from '../stores/reader';
 import type { ReaderSelection } from '../stores/reader';
+import { ChatNoteDialog } from './ChatNoteDialog';
+import type { ChatNoteDraft } from './ChatNoteDialog';
 import { MarkdownView } from './MarkdownView';
 
 interface ChatPanelProps {
@@ -12,6 +16,17 @@ interface ChatPanelProps {
   pendingImage?: string | null;
   /** Called when the image was sent successfully or was removed by the user. */
   onPendingImageConsumed?: () => void;
+  /** Opens a saved note in the notes tab. */
+  onOpenNote(noteId: number): void;
+}
+
+interface SelectionMenuState {
+  markdown: string;
+  messageId: number;
+  pageNo: number | null;
+  x: number;
+  y: number;
+  below: boolean;
 }
 
 function truncate(text: string, max: number): string {
@@ -22,6 +37,7 @@ export function ChatPanel({
   paper,
   pendingImage = null,
   onPendingImageConsumed,
+  onOpenNote,
 }: ChatPanelProps): React.JSX.Element {
   const paperId = paper.id;
   const conversations = useChatStore((state) => state.conversations);
@@ -51,8 +67,12 @@ export function ChatPanel({
   const [renaming, setRenaming] = useState(false);
   const [renameDraft, setRenameDraft] = useState('');
   const [panelError, setPanelError] = useState<string | null>(null);
+  const [selectionMenu, setSelectionMenu] = useState<SelectionMenuState | null>(null);
+  const [noteDraft, setNoteDraft] = useState<ChatNoteDraft | null>(null);
+  const [savedNote, setSavedNote] = useState<Note | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
+  const selectionPopupRef = useRef<HTMLDivElement | null>(null);
 
   const streamingText =
     activeRequestId === null ? '' : (streamingByRequest[activeRequestId] ?? '');
@@ -69,6 +89,9 @@ export function ChatPanel({
     setSelection(null);
     setRenaming(false);
     setPanelError(null);
+    setSelectionMenu(null);
+    setNoteDraft(null);
+    setSavedNote(null);
   }, [paperId]);
 
   // `requestFocus` (bumped by App when 问 AI is clicked) focuses the textarea.
@@ -92,6 +115,79 @@ export function ChatPanel({
       element.scrollTop = element.scrollHeight;
     }
   }, [messages, streamingText]);
+
+  // A fixed-position selection popup goes stale when the view moves or the
+  // user clicks elsewhere; close it on both.
+  useEffect(() => {
+    if (selectionMenu === null) {
+      return;
+    }
+    const handleMouseDown = (event: MouseEvent): void => {
+      if (
+        selectionPopupRef.current !== null &&
+        event.target instanceof Node &&
+        selectionPopupRef.current.contains(event.target)
+      ) {
+        return;
+      }
+      setSelectionMenu(null);
+    };
+    const handleResize = (): void => setSelectionMenu(null);
+    document.addEventListener('mousedown', handleMouseDown);
+    window.addEventListener('resize', handleResize);
+    return () => {
+      document.removeEventListener('mousedown', handleMouseDown);
+      window.removeEventListener('resize', handleResize);
+    };
+  }, [selectionMenu]);
+
+  const handleMessagesMouseUp = (): void => {
+    // Let the browser finish updating the selection before reading it.
+    window.setTimeout(() => {
+      const selected = readAssistantSelection();
+      if (selected === null) {
+        setSelectionMenu(null);
+        return;
+      }
+      const pageNo = findAssistantSourcePage(messages, selected.messageId);
+      const centerX = (selected.rect.left + selected.rect.right) / 2;
+      const x = Math.min(Math.max(centerX, 120), Math.max(120, window.innerWidth - 120));
+      const below = selected.rect.top < 90;
+      setSelectionMenu({
+        markdown: selected.markdown,
+        messageId: selected.messageId,
+        pageNo,
+        x,
+        y: below ? selected.rect.bottom + 8 : selected.rect.top - 8,
+        below,
+      });
+    }, 0);
+  };
+
+  const openWholeAnswerNote = (message: ChatMessage): void => {
+    setPanelError(null);
+    setSelectionMenu(null);
+    setNoteDraft({
+      markdown: message.content,
+      pageNo: findAssistantSourcePage(messages, message.id),
+      kind: 'message',
+      title: suggestAiNoteTitle(message.content),
+    });
+  };
+
+  const openSelectedNote = (): void => {
+    if (selectionMenu === null) {
+      return;
+    }
+    setNoteDraft({
+      markdown: selectionMenu.markdown,
+      pageNo: selectionMenu.pageNo,
+      kind: 'selection',
+      title: suggestAiNoteTitle(selectionMenu.markdown),
+    });
+    setSelectionMenu(null);
+    window.getSelection()?.removeAllRanges();
+  };
 
   const runAction = async (action: () => Promise<void>): Promise<void> => {
     setPanelError(null);
@@ -266,7 +362,37 @@ export function ChatPanel({
         </div>
       )}
 
-      <div className="chat-messages" ref={messagesRef} aria-live="polite">
+      {savedNote !== null && (
+        <div className="chat-note-notice" role="status">
+          <span>已保存到笔记「{savedNote.title}」</span>
+          <button
+            type="button"
+            className="menu-button"
+            onClick={() => {
+              onOpenNote(savedNote.id);
+              setSavedNote(null);
+            }}
+          >
+            查看笔记
+          </button>
+          <button
+            type="button"
+            className="chat-note-notice-close"
+            aria-label="关闭保存提示"
+            onClick={() => setSavedNote(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
+      <div
+        className="chat-messages"
+        ref={messagesRef}
+        aria-live="polite"
+        onMouseUp={handleMessagesMouseUp}
+        onScroll={() => setSelectionMenu(null)}
+      >
         {messages.length === 0 && activeRequestId === null && (
           <p className="empty-state chat-empty">
             {conversations.length === 0
@@ -275,7 +401,11 @@ export function ChatPanel({
           </p>
         )}
         {messages.map((message) => (
-          <article className={`chat-message chat-message-${message.role}`} key={message.id}>
+          <article
+            className={`chat-message chat-message-${message.role}`}
+            key={message.id}
+            data-message-id={message.id}
+          >
             <div className="chat-message-role">
               {message.role === 'user' ? '我' : message.role === 'assistant' ? 'AI' : '系统'}
             </div>
@@ -286,6 +416,18 @@ export function ChatPanel({
               </blockquote>
             )}
             <MarkdownView text={message.content} />
+            {message.role === 'assistant' && message.content.trim() !== '' && (
+              <div className="chat-message-actions">
+                <button
+                  type="button"
+                  className="chat-note-button"
+                  title="把这条回答保存为笔记"
+                  onClick={() => openWholeAnswerNote(message)}
+                >
+                  存为笔记
+                </button>
+              </div>
+            )}
           </article>
         ))}
         {activeRequestId !== null && (
@@ -360,6 +502,38 @@ export function ChatPanel({
           </div>
         </div>
       </div>
+
+      {selectionMenu !== null && (
+        <div
+          ref={selectionPopupRef}
+          className={
+            selectionMenu.below
+              ? 'chat-selection-popup below'
+              : 'chat-selection-popup'
+          }
+          style={{
+            left: `${selectionMenu.x}px`,
+            top: `${selectionMenu.y}px`,
+          }}
+          onMouseDown={(event) => event.preventDefault()}
+        >
+          <button type="button" onClick={openSelectedNote}>
+            存为笔记
+          </button>
+        </div>
+      )}
+
+      {noteDraft !== null && (
+        <ChatNoteDialog
+          paper={paper}
+          draft={noteDraft}
+          onClose={() => setNoteDraft(null)}
+          onSaved={(note) => {
+            setNoteDraft(null);
+            setSavedNote(note);
+          }}
+        />
+      )}
     </div>
   );
 }

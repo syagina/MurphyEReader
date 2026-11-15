@@ -345,6 +345,22 @@ export default function App(): React.JSX.Element {
     });
   };
 
+  // A saved AI note may target the current paper only; load that paper's notes
+  // before selecting the new row so the editor opens on the right note.
+  const handleOpenNote = (noteId: number): void => {
+    if (openedPaper === null) {
+      return;
+    }
+    setAiCollapsed(false);
+    setAiTab('notes');
+    void useNotesStore
+      .getState()
+      .load(openedPaper.id)
+      .then(() => {
+        useNotesStore.getState().selectNote(noteId);
+      });
+  };
+
   // 选框提问: keep the cropped image in the composer, then focus the chat tab.
   const handleCaptureAsk = (imageDataUrl: string): void => {
     setPendingImage(imageDataUrl);
@@ -508,6 +524,7 @@ export default function App(): React.JSX.Element {
                     paper={openedPaper}
                     pendingImage={pendingImage}
                     onPendingImageConsumed={() => setPendingImage(null)}
+                    onOpenNote={handleOpenNote}
                   />
                 ) : (
                   <>

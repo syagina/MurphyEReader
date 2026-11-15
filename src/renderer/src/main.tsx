@@ -7,9 +7,20 @@ import './styles.css';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import App from './App';
+import { ExportDocument } from './components/ExportDocument';
+
+const exportToken = new URLSearchParams(window.location.search).get('exportJob');
+if (exportToken !== null) {
+  // The export page is a full-height document, not the fixed application shell.
+  document.body.classList.add('export-body');
+}
 
 createRoot(document.getElementById('root')!).render(
-  <StrictMode>
-    <App />
-  </StrictMode>,
+  exportToken !== null ? (
+    <ExportDocument token={exportToken} />
+  ) : (
+    <StrictMode>
+      <App />
+    </StrictMode>
+  ),
 );

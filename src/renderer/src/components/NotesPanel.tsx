@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
-import type { Paper } from '@shared/types';
+import type { ExportFormat, Paper } from '@shared/types';
 import { errorMessage } from '../lib/errors';
+import { EXPORT_FORMAT_LABELS, exportNoteDocument } from '../lib/export-note';
 import {
   NOTE_TYPE_SECTIONS,
   buildNotesExportFileName,
@@ -28,6 +29,7 @@ export function NotesPanel({ paper }: NotesPanelProps): React.JSX.Element {
   const clearError = useNotesStore((state) => state.clearError);
 
   const [exporting, setExporting] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('pdf');
   const [localError, setLocalError] = useState<string | null>(null);
 
   useEffect(() => {
@@ -61,7 +63,12 @@ export function NotesPanel({ paper }: NotesPanelProps): React.JSX.Element {
     setExporting(true);
     try {
       const markdown = buildPaperNotesMarkdown(paper, notes);
-      await window.api.exportFile.save(buildNotesExportFileName(paper), markdown);
+      await exportNoteDocument(
+        buildNotesExportFileName(paper, exportFormat),
+        `《${paper.title}》笔记`,
+        markdown,
+        exportFormat,
+      );
     } catch (exportError) {
       setLocalError(errorMessage(exportError));
     } finally {
@@ -94,6 +101,17 @@ export function NotesPanel({ paper }: NotesPanelProps): React.JSX.Element {
           >
             {generating === 'innovation' ? '生成中…' : '找创新点'}
           </button>
+          <select
+            className="notes-export-format"
+            aria-label="导出格式"
+            value={exportFormat}
+            disabled={exporting || notes.length === 0}
+            onChange={(event) => setExportFormat(event.target.value as ExportFormat)}
+          >
+            <option value="pdf">PDF</option>
+            <option value="docx">Word (.docx)</option>
+            <option value="md">Markdown (.md)</option>
+          </select>
           <button
             type="button"
             className="menu-button"
@@ -102,7 +120,9 @@ export function NotesPanel({ paper }: NotesPanelProps): React.JSX.Element {
               void handleExport();
             }}
           >
-            {exporting ? '导出中…' : '导出 Markdown'}
+            {exporting
+              ? '导出中…'
+              : `导出 ${EXPORT_FORMAT_LABELS[exportFormat]}`}
           </button>
         </div>
       </div>
@@ -124,7 +144,11 @@ export function NotesPanel({ paper }: NotesPanelProps): React.JSX.Element {
       )}
 
       {selectedNote !== null ? (
-        <NoteEditor note={selectedNote} onClose={() => selectNote(null)} />
+        <NoteEditor
+          paper={paper}
+          note={selectedNote}
+          onClose={() => selectNote(null)}
+        />
       ) : (
         <div className="notes-list">
           {notes.length === 0 && (

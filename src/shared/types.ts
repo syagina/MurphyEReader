@@ -52,6 +52,15 @@ export interface ChatMessage {
 
 export type NoteType = 'concept' | 'summary' | 'manual' | 'idea';
 
+/** Formats a paper's notes can be exported to. */
+export type ExportFormat = 'md' | 'pdf' | 'docx';
+
+/** Content handed to the hidden renderer window that produces a PDF. */
+export interface PdfExportJob {
+  title: string;
+  markdown: string;
+}
+
 export interface Note {
   id: number;
   paperId: number;

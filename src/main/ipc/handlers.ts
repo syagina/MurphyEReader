@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
-import { basename } from 'node:path';
+import { basename, join } from 'node:path';
 import type Database from 'better-sqlite3';
 import * as electron from 'electron';
 import type { BrowserWindow } from 'electron';
@@ -20,6 +20,8 @@ import { createNote, deleteNote, listNotes, updateNote } from '../db/notes';
 import { replacePages } from '../db/pages';
 import { deletePaper, getPaper, listPapers, markRead, updatePaper } from '../db/papers';
 import { searchGlobal } from '../db/search';
+import { ensureFileExtension } from '../export/file-path';
+import { PdfExporter } from '../export/pdf-exporter';
 import { attachTranslatedPdf, importPaper } from '../papers/import-service';
 import { extractPdf, getPdfPageCount } from '../pdf/extract';
 import { getApiKey, getSettings, setSettings } from '../settings';
@@ -94,6 +96,11 @@ export async function toLoadPayload(
 
 export function registerIpcHandlers(deps: HandlerDeps): void {
   const { db, secret, emit } = deps;
+  const pdfExporter = new PdfExporter({
+    preloadPath: join(__dirname, '../preload/index.js'),
+    rendererFile: join(__dirname, '../renderer/index.html'),
+    rendererUrl: process.env['ELECTRON_RENDERER_URL'],
+  });
 
   const pickPdf = async (): Promise<string | null> => {
     const result = await electron.dialog.showOpenDialog({
@@ -276,6 +283,77 @@ export function registerIpcHandlers(deps: HandlerDeps): void {
       return result.filePath;
     },
   );
+
+  electron.ipcMain.handle(
+    'export:saveDocx',
+    async (_event, suggestedName: string, data: Uint8Array) => {
+      if (typeof suggestedName !== 'string' || !(data instanceof Uint8Array)) {
+        throw new Error('Word 导出数据无效');
+      }
+      const result = await electron.dialog.showSaveDialog({
+        defaultPath: suggestedName,
+        filters: [{ name: 'Word 文档', extensions: ['docx'] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return null;
+      }
+      const target = ensureFileExtension(result.filePath, '.docx');
+      await writeFile(target, Buffer.from(data));
+      return target;
+    },
+  );
+
+  electron.ipcMain.handle(
+    'export:printPdf',
+    async (
+      _event,
+      suggestedName: string,
+      title: string,
+      markdown: string,
+    ): Promise<string | null> => {
+      if (
+        typeof suggestedName !== 'string' ||
+        typeof title !== 'string' ||
+        typeof markdown !== 'string'
+      ) {
+        throw new Error('PDF 导出参数无效');
+      }
+      if (markdown.length > 20_000_000) {
+        throw new Error('导出内容过大');
+      }
+      const result = await electron.dialog.showSaveDialog({
+        defaultPath: suggestedName,
+        filters: [{ name: 'PDF 文档', extensions: ['pdf'] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return null;
+      }
+      const target = ensureFileExtension(result.filePath, '.pdf');
+      const pdf = await pdfExporter.render({
+        title: title.trim() === '' ? 'PaperLens 笔记' : title,
+        markdown,
+      });
+      await writeFile(target, pdf);
+      return target;
+    },
+  );
+
+  electron.ipcMain.handle('export:getJob', (event, token: string) =>
+    typeof token === 'string' ? pdfExporter.getJob(token, event.sender) : null,
+  );
+
+  electron.ipcMain.handle('export:ready', (event, token: string) => {
+    if (typeof token !== 'string') {
+      throw new Error('无效的 PDF 导出任务');
+    }
+    pdfExporter.markReady(token, event.sender);
+  });
+
+  electron.ipcMain.handle('export:fail', (event, token: string, message: string) => {
+    if (typeof token === 'string' && typeof message === 'string') {
+      pdfExporter.markFailed(token, event.sender, message);
+    }
+  });
 
   electron.ipcMain.handle('window:setFullscreen', (_event, fullscreen: boolean) => {
     const win = deps.mainWindow();

@@ -200,9 +200,11 @@ describe('useNotesStore.create', () => {
       tags: [],
     };
 
-    await useNotesStore.getState().create(input);
+    const result = await useNotesStore.getState().create(input);
 
     const state = useNotesStore.getState();
+    expect(result).not.toBeNull();
+    expect(result?.id).toBe(99);
     expect(api.create).toHaveBeenCalledWith(input);
     expect(state.notes[0]?.id).toBe(99);
     expect(state.selectedNoteId).toBe(99);
@@ -212,7 +214,7 @@ describe('useNotesStore.create', () => {
     useNotesStore.setState({ paperId: 1, notes: [makeNote(1)], selectedNoteId: 1 });
     api.create.mockRejectedValue(new Error('写入失败'));
 
-    await useNotesStore.getState().create({
+    const result = await useNotesStore.getState().create({
       paperId: 1,
       type: 'manual',
       title: '手动笔记',
@@ -221,6 +223,7 @@ describe('useNotesStore.create', () => {
     });
 
     const state = useNotesStore.getState();
+    expect(result).toBeNull();
     expect(state.error).toBe('写入失败');
     expect(state.notes.map((note) => note.id)).toEqual([1]);
     expect(state.selectedNoteId).toBe(1);
@@ -256,13 +259,14 @@ describe('useNotesStore.update', () => {
     useNotesStore.setState({ paperId: 1, notes: [original], selectedNoteId: 1 });
     api.update.mockResolvedValue(updated);
 
-    await useNotesStore.getState().update(1, {
+    const result = await useNotesStore.getState().update(1, {
       title: '新标题',
       contentMd: '新正文',
       tags: ['方法'],
     });
 
     const state = useNotesStore.getState();
+    expect(result).toEqual(updated);
     expect(api.update).toHaveBeenCalledWith(1, {
       title: '新标题',
       contentMd: '新正文',
@@ -278,9 +282,10 @@ describe('useNotesStore.update', () => {
     useNotesStore.setState({ paperId: 1, notes: [original] });
     api.update.mockRejectedValue(new Error('保存失败'));
 
-    await useNotesStore.getState().update(1, { title: '新标题' });
+    const result = await useNotesStore.getState().update(1, { title: '新标题' });
 
     const state = useNotesStore.getState();
+    expect(result).toBeNull();
     expect(state.error).toBe('保存失败');
     expect(state.notes[0]).toEqual(original);
   });

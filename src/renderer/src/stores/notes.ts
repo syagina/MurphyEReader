@@ -17,8 +17,8 @@ export interface NotesState {
   generating: NoteKind | null;
   error: string | null;
   load(paperId?: number): Promise<void>;
-  create(input: NoteCreateInput): Promise<void>;
-  update(id: number, patch: NoteUpdatePatch): Promise<void>;
+  create(input: NoteCreateInput): Promise<Note | null>;
+  update(id: number, patch: NoteUpdatePatch): Promise<Note | null>;
   remove(id: number): Promise<void>;
   generate(kind: NoteKind, params: NoteGenerateParams): Promise<Note | null>;
   selectNote(id: number | null): void;
@@ -88,8 +88,10 @@ export const useNotesStore = create<NotesState>()((set, get) => ({
           selectedNoteId: note.id,
         };
       });
+      return note;
     } catch (error) {
       set({ error: errorMessage(error) });
+      return null;
     }
   },
 
@@ -102,8 +104,10 @@ export const useNotesStore = create<NotesState>()((set, get) => ({
           state.notes.map((existing) => (existing.id === note.id ? note : existing)),
         ),
       }));
+      return note;
     } catch (error) {
       set({ error: errorMessage(error) });
+      return null;
     }
   },
 

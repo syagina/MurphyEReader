@@ -7,6 +7,7 @@ import type {
   Note,
   NoteType,
   Paper,
+  PdfExportJob,
   SearchResult,
 } from './types';
 
@@ -75,6 +76,16 @@ export interface PaperLensApi {
   };
   exportFile: {
     save(suggestedName: string, content: string): Promise<string | null>;
+    /** Writes a generated .docx after asking the user where to save it. */
+    saveDocx(suggestedName: string, data: Uint8Array): Promise<string | null>;
+    /** Renders Markdown to PDF in a hidden window, then asks where to save it. */
+    printPdf(suggestedName: string, title: string, markdown: string): Promise<string | null>;
+    /** Hidden export window only: fetches the job its query token refers to. */
+    getJob(token: string): Promise<PdfExportJob | null>;
+    /** Hidden export window only: reports that fonts/layout are ready to print. */
+    ready(token: string): Promise<void>;
+    /** Hidden export window only: reports a rendering failure to the main process. */
+    fail(token: string, message: string): Promise<void>;
   };
   window: {
     setFullscreen(fullscreen: boolean): Promise<boolean>;

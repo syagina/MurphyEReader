@@ -1,17 +1,24 @@
 import { useEffect, useState } from 'react';
-import type { Note } from '@shared/types';
+import type { ExportFormat, Note, Paper } from '@shared/types';
+import { errorMessage } from '../lib/errors';
+import { EXPORT_FORMAT_LABELS, exportNoteDocument } from '../lib/export-note';
+import {
+  buildNoteExportFileName,
+  buildNoteMarkdown,
+} from '../lib/export-markdown';
 import { parseTags } from '../lib/format';
 import { useNotesStore } from '../stores/notes';
 import { MarkdownView } from './MarkdownView';
 
 interface NoteEditorProps {
+  paper: Paper;
   note: Note;
   onClose(): void;
 }
 
 type EditorMode = 'edit' | 'preview';
 
-export function NoteEditor({ note, onClose }: NoteEditorProps): React.JSX.Element {
+export function NoteEditor({ paper, note, onClose }: NoteEditorProps): React.JSX.Element {
   const update = useNotesStore((state) => state.update);
   const remove = useNotesStore((state) => state.remove);
 
@@ -21,6 +28,8 @@ export function NoteEditor({ note, onClose }: NoteEditorProps): React.JSX.Elemen
   const [mode, setMode] = useState<EditorMode>('edit');
   const [saving, setSaving] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportFormat, setExportFormat] = useState<ExportFormat>('pdf');
   const [localError, setLocalError] = useState<string | null>(null);
 
   // Switching notes or saving (updatedAt changes) resets the draft to the
@@ -33,7 +42,31 @@ export function NoteEditor({ note, onClose }: NoteEditorProps): React.JSX.Elemen
     setLocalError(null);
   }, [note.id, note.updatedAt]);
 
-  const busy = saving || deleting;
+  const busy = saving || deleting || exporting;
+
+  const handleExport = async (): Promise<void> => {
+    const draftTitle = title.trim() === '' ? note.title : title.trim();
+    const draftNote: Note = {
+      ...note,
+      title: draftTitle,
+      tags: parseTags(tags),
+      contentMd,
+    };
+    setExporting(true);
+    setLocalError(null);
+    try {
+      await exportNoteDocument(
+        buildNoteExportFileName(paper, draftNote, exportFormat),
+        draftTitle,
+        buildNoteMarkdown(paper, draftNote),
+        exportFormat,
+      );
+    } catch (exportError) {
+      setLocalError(errorMessage(exportError));
+    } finally {
+      setExporting(false);
+    }
+  };
 
   const handleSave = async (): Promise<void> => {
     const trimmedTitle = title.trim();
@@ -143,16 +176,39 @@ export function NoteEditor({ note, onClose }: NoteEditorProps): React.JSX.Elemen
       </div>
 
       <div className="note-editor-actions">
-        <button
-          type="button"
-          className="menu-button danger"
-          disabled={busy}
-          onClick={() => {
-            void handleDelete();
-          }}
-        >
-          删除
-        </button>
+        <div className="note-editor-left-actions">
+          <button
+            type="button"
+            className="menu-button danger"
+            disabled={busy}
+            onClick={() => {
+              void handleDelete();
+            }}
+          >
+            删除
+          </button>
+          <select
+            className="note-export-format"
+            aria-label="导出格式"
+            value={exportFormat}
+            disabled={busy}
+            onChange={(event) => setExportFormat(event.target.value as ExportFormat)}
+          >
+            <option value="pdf">PDF</option>
+            <option value="docx">Word</option>
+            <option value="md">Markdown</option>
+          </select>
+          <button
+            type="button"
+            className="menu-button"
+            disabled={busy}
+            onClick={() => {
+              void handleExport();
+            }}
+          >
+            {exporting ? '导出中…' : `导出 ${EXPORT_FORMAT_LABELS[exportFormat]}`}
+          </button>
+        </div>
         <div className="note-editor-save-actions">
           <button
             type="button"

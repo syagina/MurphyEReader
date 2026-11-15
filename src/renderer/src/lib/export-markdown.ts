@@ -1,4 +1,4 @@
-import type { Note, NoteType, Paper } from '@shared/types';
+import type { ExportFormat, Note, NoteType, Paper } from '@shared/types';
 import { formatTimestamp } from './format';
 
 export interface NoteTypeSection {
@@ -9,19 +9,51 @@ export interface NoteTypeSection {
 /** Windows refuses these characters in file names; controls are also unsafe. */
 const ILLEGAL_FILENAME_CHARS = /[<>:"/\\|?*\u0000-\u001f\u007f]+/g;
 
+const EXPORT_EXTENSIONS: Record<ExportFormat, string> = {
+  md: 'md',
+  pdf: 'pdf',
+  docx: 'docx',
+};
+
+const FILE_NAME_PART_LIMIT = 80;
+
 /**
- * Builds the save-dialog default name for a paper's notes export. Illegal
- * Windows filename characters are replaced with `_`; leading/trailing dots,
- * underscores and spaces are stripped. A title with no usable characters
- * falls back to `笔记`, so the name always stays usable.
+ * Sanitizes one component of a save-dialog file name. Illegal Windows
+ * characters become `_`; whitespace is collapsed; leading/trailing dots,
+ * underscores and spaces are stripped; very long titles are shortened so a
+ * paper title plus a note title still leaves room for folders and extensions.
  */
-export function buildNotesExportFileName(paper: Pick<Paper, 'title'>): string {
-  const sanitized = paper.title
+export function sanitizeFileNamePart(value: string, fallback: string): string {
+  const sanitized = value
     .replace(ILLEGAL_FILENAME_CHARS, '_')
     .replace(/\s+/g, ' ')
     .trim()
     .replace(/^[._\s]+|[._\s]+$/g, '');
-  return `${sanitized === '' ? '笔记' : sanitized}-笔记.md`;
+  const shortened = sanitized.slice(0, FILE_NAME_PART_LIMIT).replace(/[._\s]+$/g, '');
+  return shortened === '' ? fallback : shortened;
+}
+
+/**
+ * Builds the save-dialog default name for a paper's notes export. The
+ * default remains Markdown for callers that predate the format selector.
+ */
+export function buildNotesExportFileName(
+  paper: Pick<Paper, 'title'>,
+  format: ExportFormat = 'md',
+): string {
+  return `${sanitizeFileNamePart(paper.title, '笔记')}-笔记.${EXPORT_EXTENSIONS[format]}`;
+}
+
+/** Builds the save-dialog default name for one note and its paper. */
+export function buildNoteExportFileName(
+  paper: Pick<Paper, 'title'>,
+  note: Pick<Note, 'title'>,
+  format: ExportFormat = 'md',
+): string {
+  return `${sanitizeFileNamePart(paper.title, '文献')}-${sanitizeFileNamePart(
+    note.title,
+    '笔记',
+  )}.${EXPORT_EXTENSIONS[format]}`;
 }
 
 /**
@@ -68,3 +100,24 @@ export function buildPaperNotesMarkdown(paper: Paper, notes: Note[]): string {
 
   return `${lines.join('\n').trimEnd()}\n`;
 }
+
+/**
+ * Builds a single-note Markdown document. The paper title, timestamps and
+ * tags give the exported PDF/Word file enough context when it is read on its
+ * own, away from the notes panel.
+ */
+export function buildNoteMarkdown(paper: Pick<Paper, 'title'>, note: Note): string {
+  const lines = [
+    `# ${note.title}`,
+    '',
+    `**文献：**《${paper.title}》`,
+    `创建时间：${formatTimestamp(note.createdAt)}`,
+    `更新时间：${formatTimestamp(note.updatedAt)}`,
+  ];
+  if (note.tags.length > 0) {
+    lines.push(`标签：${note.tags.join('、')}`);
+  }
+  lines.push('', note.contentMd.trimEnd());
+  return `${lines.join('\n').trimEnd()}\n`;
+}
+

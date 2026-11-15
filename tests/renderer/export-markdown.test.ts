@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { Note, Paper } from '@shared/types';
 import {
+  buildNoteExportFileName,
+  buildNoteMarkdown,
   buildNotesExportFileName,
   buildPaperNotesMarkdown,
 } from '@renderer/lib/export-markdown';
@@ -150,5 +152,57 @@ describe('buildNotesExportFileName', () => {
 
   it('标题只有非法字符时仍返回可用文件名', () => {
     expect(buildNotesExportFileName({ title: ':?*"<>|/\\' })).toBe('笔记-笔记.md');
+  });
+
+  it('按导出格式选择扩展名', () => {
+    expect(buildNotesExportFileName({ title: '论文' }, 'pdf')).toBe('论文-笔记.pdf');
+    expect(buildNotesExportFileName({ title: '论文' }, 'docx')).toBe('论文-笔记.docx');
+    expect(buildNotesExportFileName({ title: '论文' }, 'md')).toBe('论文-笔记.md');
+  });
+});
+
+describe('buildNoteExportFileName', () => {
+  it('includes both the paper and note titles', () => {
+    expect(
+      buildNoteExportFileName({ title: '有限元方法导论' }, { title: '核心思想' }, 'docx'),
+    ).toBe('有限元方法导论-核心思想.docx');
+  });
+
+  it('sanitizes both title parts', () => {
+    const name = buildNoteExportFileName(
+      { title: 'A/B' },
+      { title: 'C:D' },
+      'pdf',
+    );
+
+    expect(name).toBe('A_B-C_D.pdf');
+  });
+});
+
+describe('buildNoteMarkdown', () => {
+  it('wraps one note with paper context, timestamps, tags, and body', () => {
+    const markdown = buildNoteMarkdown(
+      makePaper({ title: '有限元方法导论' }),
+      makeNote(1, {
+        title: '应变能密度',
+        contentMd: '正文 $E = \\frac{1}{2}\\sigma\\varepsilon$',
+        tags: ['弹性', '方法'],
+      }),
+    );
+
+    expect(markdown).toContain('# 应变能密度');
+    expect(markdown).toContain('**文献：**《有限元方法导论》');
+    expect(markdown).toMatch(/创建时间：\d{4}-\d{2}-\d{2} \d{2}:\d{2}/);
+    expect(markdown).toContain('标签：弹性、方法');
+    expect(markdown).toContain('正文 $E = \\frac{1}{2}\\sigma\\varepsilon$');
+  });
+
+  it('omits the tag line when the note has no tags', () => {
+    const markdown = buildNoteMarkdown(
+      { title: '论文' },
+      makeNote(1, { tags: [] }),
+    );
+
+    expect(markdown).not.toContain('标签：');
   });
 });
