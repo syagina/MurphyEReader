@@ -20,6 +20,7 @@ import type {
   PdfExportJob,
   RootChangeResult,
   SearchResult,
+  SelectionTranslationResult,
   StorageInfo,
 } from './types';
 
@@ -62,6 +63,10 @@ export interface PaperLensApi {
     onDelta(cb: (e: { requestId: string; delta: string }) => void): () => void;
     onDone(cb: (e: { requestId: string; message: ChatMessage }) => void): () => void;
     onError(cb: (e: { requestId: string; error: string }) => void): () => void;
+  };
+  translate: {
+    /** Translates a free selection; nothing is persisted. */
+    text(input: { text: string }): Promise<SelectionTranslationResult>;
   };
   notes: {
     list(paperId?: number): Promise<Note[]>;

@@ -49,6 +49,9 @@ const api: PaperLensApi = {
     onDone: (cb) => subscribe('chat:done', cb),
     onError: (cb) => subscribe('chat:error', cb),
   },
+  translate: {
+    text: (input) => ipcRenderer.invoke('translate:text', input),
+  },
   notes: {
     list: (paperId) => ipcRenderer.invoke('notes:list', paperId),
     create: (input) => ipcRenderer.invoke('notes:create', input),

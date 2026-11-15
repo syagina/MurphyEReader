@@ -493,6 +493,7 @@ export default function App(): React.JSX.Element {
                 onJudgeDepth={handleJudgeDepth}
                 onSaveNote={handleSaveNote}
                 onCaptureAsk={handleCaptureAsk}
+                onOpenSettings={() => setSettingsOpen(true)}
               />
             </div>
           </main>

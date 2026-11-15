@@ -18,6 +18,7 @@ import type {
 import { abortChat, startChat } from '../ai/chat-service';
 import { AiClient } from '../ai/client';
 import { generateNote } from '../ai/note-service';
+import { translateSelection } from '../ai/translation-service';
 import {
   createConversation,
   deleteConversation,
@@ -234,6 +235,15 @@ export function registerIpcHandlers(deps: HandlerDeps): {
     };
   });
 
+  const aiConfigured = (): boolean => {
+    const settings = getSettings(db, secret);
+    return (
+      settings.baseUrl.trim() !== '' &&
+      settings.chatModel.trim() !== '' &&
+      getApiKey(db, secret) !== ''
+    );
+  };
+
   electron.ipcMain.handle('papers:list', () => listPapers(db));
 
   electron.ipcMain.handle('papers:get', (_event, id: number) => getPaper(db, id));
@@ -359,6 +369,18 @@ export function registerIpcHandlers(deps: HandlerDeps): {
   electron.ipcMain.handle('chat:abort', (_event, requestId: string) => {
     abortChat(requestId);
   });
+
+  electron.ipcMain.handle(
+    'translate:text',
+    (_event, input: { text?: unknown } | undefined) =>
+      translateSelection(
+        {
+          complete: (messages, opts) => ai.complete(messages, opts),
+          isConfigured: aiConfigured,
+        },
+        { text: typeof input?.text === 'string' ? input.text : '' },
+      ),
+  );
 
   electron.ipcMain.handle('notes:list', (_event, paperId?: number) => listNotes(db, paperId));
 

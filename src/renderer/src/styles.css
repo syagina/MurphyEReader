@@ -2582,6 +2582,83 @@ input:focus-visible {
   opacity: 0.7;
 }
 
+/* Free-selection translation card (fixed, independent of the AI panel) */
+.selection-translation-card {
+  position: fixed;
+  z-index: 40;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(420px, calc(100vw - 32px));
+  padding: 12px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: 10px;
+  background: var(--bg-panel);
+  box-shadow: 0 8px 24px rgb(16 24 40 / 0.2);
+  transform: translateX(-50%);
+  font-size: 13px;
+}
+
+.selection-translation-original {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+}
+
+.selection-translation-status,
+.selection-translation-error {
+  margin: 0;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.selection-translation-error {
+  color: var(--danger);
+}
+
+.selection-translation-result {
+  max-height: 300px;
+  overflow-y: auto;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.selection-translation-copy-error {
+  margin: 0;
+  color: var(--danger);
+  font-size: 12px;
+}
+
+.selection-translation-spinner {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  margin-right: 6px;
+  border: 2px solid var(--border-strong);
+  border-top-color: var(--accent);
+  border-radius: 50%;
+  vertical-align: -1px;
+  animation: selection-translation-spin 0.8s linear infinite;
+}
+
+@keyframes selection-translation-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.selection-translation-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
 /* Settings entry in the top bar */
 .topbar-settings {
   flex: 0 0 auto;

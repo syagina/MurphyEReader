@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { Paper } from '@shared/types';
+import { TRANSLATION_TARGET_LABELS, detectTranslationTarget } from '@shared/translation';
 import {
   buildPageWindow,
   configurePdfWorker,
@@ -17,6 +18,7 @@ import { useLibraryStore } from '../stores/library';
 import { useSettingsStore } from '../stores/settings';
 import { PdfPage } from './PdfPage';
 import { RegionCapture } from './RegionCapture';
+import { SelectionTranslationCard } from './SelectionTranslationCard';
 
 export interface PdfViewerProps {
   paper: Paper;
@@ -26,6 +28,8 @@ export interface PdfViewerProps {
   onJudgeDepth?(selection: ReaderSelection): void;
   onSaveNote?(selection: ReaderSelection): void;
   onCaptureAsk?(imageDataUrl: string): void;
+  /** Opens the settings dialog from the translation card's unconfigured hint. */
+  onOpenSettings?(): void;
 }
 
 interface PageSize {
@@ -44,6 +48,16 @@ interface ToolbarPosition {
   left: number;
 }
 
+/** An open free-selection translation request and where its card points. */
+interface TranslationCardTarget {
+  text: string;
+  top: number;
+  left: number;
+  seq: number;
+}
+
+const AI_NOT_CONFIGURED = '请先在设置中配置 AI 接口';
+
 export function PdfViewer({
   paper,
   focusMode,
@@ -52,6 +66,7 @@ export function PdfViewer({
   onJudgeDepth,
   onSaveNote,
   onCaptureAsk,
+  onOpenSettings,
 }: PdfViewerProps): React.JSX.Element {
   const paperId = useReaderStore((state) => state.paperId);
   const version = useReaderStore((state) => state.version);
@@ -91,6 +106,14 @@ export function PdfViewer({
   const [capturing, setCapturing] = useState(false);
   const [captureError, setCaptureError] = useState<string | null>(null);
 
+  // Free-selection translation lives in the viewer only: nothing is persisted
+  // and the card is independent of the AI panel.
+  const [translationTarget, setTranslationTarget] = useState<TranslationCardTarget | null>(null);
+  const [translationLoading, setTranslationLoading] = useState(false);
+  const [translationResult, setTranslationResult] = useState<string | null>(null);
+  const [translationError, setTranslationError] = useState<string | null>(null);
+  const [translationUnconfigured, setTranslationUnconfigured] = useState(false);
+
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
   const toolbarRef = useRef<HTMLDivElement | null>(null);
@@ -101,6 +124,49 @@ export function PdfViewer({
   const lastScrollDerivedPageRef = useRef<number | null>(null);
   const programmaticScrollRef = useRef<number | null>(null);
   const programmaticTimerRef = useRef<number | null>(null);
+  const translationCardRef = useRef<HTMLDivElement | null>(null);
+  // Monotonic request sequence: only the newest translation may set state.
+  const translationSeqRef = useRef(0);
+
+  const closeTranslation = useCallback((): void => {
+    translationSeqRef.current += 1;
+    setTranslationTarget(null);
+    setTranslationLoading(false);
+    setTranslationResult(null);
+    setTranslationError(null);
+    setTranslationUnconfigured(false);
+  }, []);
+
+  const startTranslation = useCallback((text: string, top: number, left: number): void => {
+    const seq = translationSeqRef.current + 1;
+    translationSeqRef.current = seq;
+    setTranslationTarget({ text, top, left, seq });
+    setTranslationLoading(true);
+    setTranslationResult(null);
+    setTranslationError(null);
+    setTranslationUnconfigured(false);
+    window.api.translate.text({ text }).then(
+      (result) => {
+        if (translationSeqRef.current !== seq) {
+          return;
+        }
+        setTranslationResult(result.translation);
+        setTranslationLoading(false);
+      },
+      (error: unknown) => {
+        if (translationSeqRef.current !== seq) {
+          return;
+        }
+        const message = errorMessage(error);
+        if (message.includes(AI_NOT_CONFIGURED)) {
+          setTranslationUnconfigured(true);
+        } else {
+          setTranslationError(message);
+        }
+        setTranslationLoading(false);
+      },
+    );
+  }, []);
 
   // Load (and reload after relocation) the document for the current paper.
   useEffect(() => {
@@ -116,6 +182,7 @@ export function PdfViewer({
     setToolbarPosition(null);
     setCapturing(false);
     setCaptureError(null);
+    closeTranslation();
     searchSeqRef.current += 1;
     lastMarkedRef.current = null;
     lastScrollDerivedPageRef.current = null;
@@ -179,7 +246,7 @@ export function PdfViewer({
         void loadingTask.destroy();
       }
     };
-  }, [paper.id, reloadToken, version, open, setError]);
+  }, [paper.id, reloadToken, version, open, setError, closeTranslation]);
 
   const flushMarkRead = useCallback((): void => {
     if (markReadTimerRef.current !== null) {
@@ -404,13 +471,14 @@ export function PdfViewer({
       }
       useReaderStore.getState().setSelection(null);
       setToolbarPosition(null);
+      closeTranslation();
       window.getSelection()?.removeAllRanges();
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => {
       window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
+  }, [closeTranslation]);
 
   useEffect(() => {
     if (selection === null) {
@@ -429,6 +497,25 @@ export function PdfViewer({
       window.removeEventListener('mousedown', handleMouseDown);
     };
   }, [selection]);
+
+  // Clicking anywhere outside the translation card dismisses it; clicks inside
+  // (copy, retry, settings, close) must not.
+  useEffect(() => {
+    if (translationTarget === null) {
+      return;
+    }
+    const handleMouseDown = (event: MouseEvent): void => {
+      const target = event.target;
+      if (target instanceof Node && translationCardRef.current?.contains(target)) {
+        return;
+      }
+      closeTranslation();
+    };
+    window.addEventListener('mousedown', handleMouseDown);
+    return () => {
+      window.removeEventListener('mousedown', handleMouseDown);
+    };
+  }, [translationTarget, closeTranslation]);
 
   const runSearch = useCallback(async (): Promise<void> => {
     if (pdf === null) {
@@ -523,6 +610,20 @@ export function PdfViewer({
     navigator.clipboard.writeText(selection.text).catch((error: unknown) => {
       console.warn('复制选中文字失败', error);
     });
+  };
+
+  const handleTranslate = (): void => {
+    if (selection === null || toolbarPosition === null) {
+      return;
+    }
+    // The card is centered on `left` and 420px wide (see styles.css); keep it
+    // inside the window when the selection sits near an edge.
+    const halfWidth = Math.min(210, Math.max(0, window.innerWidth / 2 - 16));
+    const left = Math.min(
+      Math.max(toolbarPosition.left, halfWidth + 8),
+      Math.max(halfWidth + 8, window.innerWidth - halfWidth - 8),
+    );
+    startTranslation(selection.text, toolbarPosition.top + 48, left);
   };
 
   const handleRelocate = async (): Promise<void> => {
@@ -799,7 +900,11 @@ export function PdfViewer({
         <div
           className="pdf-scroll"
           ref={scrollRef}
-          onScroll={updateCurrentPageFromScroll}
+          onScroll={() => {
+            // Scrolling the reading area invalidates the anchored card.
+            closeTranslation();
+            updateCurrentPageFromScroll();
+          }}
           onMouseUp={handleSelectionEvent}
           onKeyUp={handleSelectionEvent}
         >
@@ -845,6 +950,9 @@ export function PdfViewer({
           >
             问 AI
           </button>
+          <button type="button" title="翻译选中文字" onClick={handleTranslate}>
+            翻译
+          </button>
           <button
             type="button"
             disabled={onJudgeDepth === undefined}
@@ -864,6 +972,40 @@ export function PdfViewer({
           <button type="button" onClick={handleCopy}>
             复制
           </button>
+        </div>
+      )}
+
+      {translationTarget !== null && (
+        <div ref={translationCardRef}>
+          <SelectionTranslationCard
+            key={translationTarget.seq}
+            text={translationTarget.text}
+            targetLabel={
+              TRANSLATION_TARGET_LABELS[detectTranslationTarget(translationTarget.text)]
+            }
+            top={translationTarget.top}
+            left={translationTarget.left}
+            loading={translationLoading}
+            translation={translationResult}
+            error={translationError}
+            unconfigured={translationUnconfigured}
+            onRetry={() => {
+              startTranslation(
+                translationTarget.text,
+                translationTarget.top,
+                translationTarget.left,
+              );
+            }}
+            onClose={closeTranslation}
+            onOpenSettings={
+              onOpenSettings === undefined
+                ? undefined
+                : () => {
+                    onOpenSettings();
+                    closeTranslation();
+                  }
+            }
+          />
         </div>
       )}
 

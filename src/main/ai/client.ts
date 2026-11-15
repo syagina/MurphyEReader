@@ -219,7 +219,7 @@ export class AiClient {
     const { signal, timeout } = this.createSignals(opts.signal);
     try {
       const response = await raceSignal(
-        this.postChat(config, messages, true, opts.model, signal),
+        this.postChat(config, messages, true, opts.model, config.temperature, signal),
         signal,
       );
       const contentType = response.headers.get('content-type') ?? '';
@@ -236,13 +236,25 @@ export class AiClient {
 
   async complete(
     messages: AiMessage[],
-    opts: { model?: string; signal?: AbortSignal } = {},
+    opts: {
+      model?: string;
+      signal?: AbortSignal;
+      temperature?: number;
+      timeoutMs?: number;
+    } = {},
   ): Promise<string> {
     const config = this.getConfig();
-    const { signal, timeout } = this.createSignals(opts.signal);
+    const { signal, timeout } = this.createSignals(opts.signal, opts.timeoutMs);
     try {
       const response = await raceSignal(
-        this.postChat(config, messages, false, opts.model, signal),
+        this.postChat(
+          config,
+          messages,
+          false,
+          opts.model,
+          opts.temperature ?? config.temperature,
+          signal,
+        ),
         signal,
       );
       return extractMessageContent(await raceSignal(response.json(), signal));
@@ -270,11 +282,14 @@ export class AiClient {
     }
   }
 
-  private createSignals(callerSignal?: AbortSignal): {
+  private createSignals(
+    callerSignal?: AbortSignal,
+    timeoutMs?: number,
+  ): {
     signal: AbortSignal;
     timeout: AbortSignal;
   } {
-    const timeout = AbortSignal.timeout(this.timeoutMs);
+    const timeout = AbortSignal.timeout(timeoutMs ?? this.timeoutMs);
     return {
       signal:
         callerSignal === undefined
@@ -289,6 +304,7 @@ export class AiClient {
     messages: AiMessage[],
     stream: boolean,
     model: string | undefined,
+    temperature: number,
     signal?: AbortSignal,
   ): Promise<Response> {
     const response = await fetch(`${normalizeBaseUrl(config.baseUrl)}/chat/completions`, {
@@ -297,7 +313,7 @@ export class AiClient {
       body: JSON.stringify({
         model: model ?? config.chatModel,
         messages,
-        temperature: config.temperature,
+        temperature,
         stream,
       }),
       signal,

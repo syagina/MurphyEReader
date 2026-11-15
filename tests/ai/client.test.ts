@@ -209,6 +209,37 @@ describe('AiClient.complete', () => {
   });
 });
 
+describe('AiClient.complete 单次调用选项', () => {
+  it('单次 temperature 覆盖配置值且不改写全局配置', async () => {
+    const server = await startServer((_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ choices: [{ message: { content: 'ok' } }] }));
+    });
+    const config: AiConfig = {
+      baseUrl: server.baseUrl,
+      apiKey: 'sk-test',
+      chatModel: 'chat-default',
+      visionModel: 'vision-override',
+      temperature: 0.4,
+    };
+    const client = new AiClient(() => config);
+
+    await client.complete(MESSAGES, { temperature: 0.2 });
+    await client.complete(MESSAGES);
+
+    expect((JSON.parse(server.requests[0].body) as Record<string, unknown>).temperature).toBe(0.2);
+    expect((JSON.parse(server.requests[1].body) as Record<string, unknown>).temperature).toBe(0.4);
+    expect(config.temperature).toBe(0.4);
+  });
+
+  it('单次 timeoutMs 覆盖客户端默认超时', async () => {
+    vi.stubGlobal('fetch', () => new Promise<Response>(() => undefined));
+    const client = createClient('http://127.0.0.1:1', {}, 60_000);
+
+    await expect(client.complete(MESSAGES, { timeoutMs: 20 })).rejects.toThrow('请求超时');
+  });
+});
+
 describe('AiClient 超时与中止', () => {
   it('fetch 永不返回时超时映射为「请求超时」，complete 与 streamChat 一致', async () => {
     vi.stubGlobal('fetch', () => new Promise<Response>(() => undefined));

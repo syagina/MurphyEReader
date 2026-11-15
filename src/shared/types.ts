@@ -131,6 +131,15 @@ export interface Note {
   updatedAt: number;
 }
 
+/** Language a free selection is translated into. */
+export type TranslationTarget = 'zh-CN' | 'en';
+
+/** Result of translating a free text selection. */
+export interface SelectionTranslationResult {
+  translation: string;
+  targetLang: TranslationTarget;
+}
+
 export interface AiSettings {
   baseUrl: string;
   chatModel: string;
