@@ -2538,6 +2538,139 @@ input:focus-visible {
   text-align: center;
 }
 
+/* Settings tabs: inactive panels stay mounted but hidden so drafts survive. */
+.settings-tabs {
+  display: flex;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.settings-tab {
+  margin-bottom: -1px;
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.settings-tab:hover {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.settings-tab.active {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+  font-weight: 600;
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-panel[hidden] {
+  display: none;
+}
+
+.settings-ai-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-library {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.settings-root-path {
+  font-family: Consolas, 'Courier New', monospace;
+  font-size: 12px;
+}
+
+.settings-library-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.settings-library-actions .menu-button {
+  padding: 6px 12px;
+  text-align: center;
+}
+
+.settings-library-hint {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.settings-library-migration {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.settings-library-heading {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.05em;
+}
+
+.settings-library-status {
+  margin: 0;
+  font-size: 12px;
+}
+
+.settings-library-migration .menu-button {
+  padding: 6px 12px;
+  text-align: center;
+}
+
+.settings-skipped-list {
+  max-height: 120px;
+  margin: 0;
+  padding-left: 18px;
+  overflow-y: auto;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.settings-library-notice {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px solid var(--accent-soft);
+  border-radius: 6px;
+  background: var(--accent-soft);
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.5;
+  word-break: break-word;
+}
+
+.settings-library-notice .menu-button {
+  flex: 0 0 auto;
+  padding: 3px 10px;
+  text-align: center;
+}
+
 /* Full-window region capture overlay */
 .region-capture {
   position: fixed;

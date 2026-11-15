@@ -1,12 +1,14 @@
 import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
-import { basename, join } from 'node:path';
+import { basename, dirname, join } from 'node:path';
 import type Database from 'better-sqlite3';
 import * as electron from 'electron';
 import type { BrowserWindow } from 'electron';
 import type {
   AiSettingsInput,
+  AppSettings,
+  AppSettingsUpdate,
   ChatSendRequest,
   LegacyMigrationSummary,
   NoteType,
@@ -29,10 +31,12 @@ import { ensureFileExtension } from '../export/file-path';
 import { PdfExporter } from '../export/pdf-exporter';
 import { JobRegistry } from '../jobs/job-registry';
 import { getApiKey, getSettings, setSettings } from '../settings';
-import { getStoredAppSettings } from '../settings/app-settings';
+import { getStoredAppSettings, setStoredAppSettings } from '../settings/app-settings';
 import type { SecretStore } from '../settings/secret-store';
 import { migrateLegacyPapers } from '../storage/legacy-migration';
 import { PaperLibrary } from '../storage/library-service';
+import { isCanonicalStorageDir } from '../storage/paths';
+import { changeLibraryRoot } from '../storage/root-change';
 import { readStorageInfo } from '../storage/storage-info';
 
 export interface HandlerDeps {
@@ -122,6 +126,12 @@ export function registerIpcHandlers(deps: HandlerDeps): {
     db,
     jobs,
     getRoot: libraryRoot,
+  });
+  // Task 12 replaces the detected engine path with a real probe; until then
+  // the field is present but empty.
+  const readAppSettings = (): AppSettings => ({
+    ...getStoredAppSettings(db, deps.documentsDir),
+    babeldocDetectedPath: null,
   });
   const pdfExporter = new PdfExporter({
     preloadPath: join(__dirname, '../preload/index.js'),
@@ -413,6 +423,62 @@ export function registerIpcHandlers(deps: HandlerDeps): {
   // A manual retry reports its failure to the caller after recording it; the
   // startup run below swallows it so the window still opens.
   electron.ipcMain.handle('storage:migrateLegacy', () => runStorageMigration());
+
+  electron.ipcMain.handle('storage:chooseRoot', async () => {
+    const result = await electron.dialog.showOpenDialog({
+      defaultPath: libraryRoot(),
+      properties: ['openDirectory'],
+    });
+    if (result.canceled || result.filePaths.length === 0) {
+      return null;
+    }
+    return result.filePaths[0];
+  });
+
+  electron.ipcMain.handle('storage:changeRoot', async (_event, newRoot: string) => {
+    const result = await changeLibraryRoot(db, jobs, libraryRoot(), newRoot);
+    // The old migration summary and error describe the previous root.
+    lastMigration = null;
+    lastStorageError = null;
+    return result;
+  });
+
+  electron.ipcMain.handle('storage:openRoot', async () => {
+    const message = await electron.shell.openPath(libraryRoot());
+    if (message !== '') {
+      throw new Error(`无法打开文件夹：${message}`);
+    }
+  });
+
+  electron.ipcMain.handle('storage:revealPaper', async (_event, paperId: number) => {
+    const paper = getPaper(db, paperId);
+    if (paper === null) {
+      throw new Error(`文献不存在: ${paperId}`);
+    }
+    let folder: string;
+    if (paper.storageDir !== null) {
+      if (!isCanonicalStorageDir(paper.storageDir, paper.id)) {
+        throw new Error('文献文件夹路径异常，请重新定位或导入');
+      }
+      folder = join(libraryRoot(), paper.storageDir);
+    } else {
+      if (paper.filePathOriginal === '') {
+        throw new Error('无法打开文件夹：原文路径为空');
+      }
+      folder = dirname(paper.filePathOriginal);
+    }
+    const message = await electron.shell.openPath(folder);
+    if (message !== '') {
+      throw new Error(`无法打开文件夹：${message}`);
+    }
+  });
+
+  electron.ipcMain.handle('appSettings:get', () => readAppSettings());
+
+  electron.ipcMain.handle('appSettings:update', (_event, patch: AppSettingsUpdate) => {
+    setStoredAppSettings(db, patch);
+    return readAppSettings();
+  });
 
   return {
     jobs,

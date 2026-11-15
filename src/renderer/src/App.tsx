@@ -7,6 +7,7 @@ import { OutlinePanel } from './components/OutlinePanel';
 import { PdfViewer } from './components/PdfViewer';
 import { SearchPanel } from './components/SearchPanel';
 import { SettingsDialog } from './components/SettingsDialog';
+import type { SettingsTab } from './components/SettingsDialog';
 import { errorMessage } from './lib/errors';
 import { useChatStore } from './stores/chat';
 import { useLibraryStore } from './stores/library';
@@ -43,6 +44,7 @@ export default function App(): React.JSX.Element {
   // Region-screenshot attachment waiting in the chat composer.
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<SettingsTab>('ai');
   // Click-time navigation failures stay visible in the top bar until dismissed,
   // unlike the dropdown error which disappears with the query.
   const [clickError, setClickError] = useState<string | null>(null);
@@ -439,7 +441,10 @@ export default function App(): React.JSX.Element {
         <button
           type="button"
           className="topbar-settings"
-          onClick={() => setSettingsOpen(true)}
+          onClick={() => {
+            setSettingsTab('ai');
+            setSettingsOpen(true);
+          }}
         >
           设置
         </button>
@@ -450,6 +455,10 @@ export default function App(): React.JSX.Element {
           onOpen={handleOpenPaper}
           onContinueReading={openedPaper === null ? undefined : handleContinueReading}
           activePaperId={openedPaper === null ? null : openedPaper.id}
+          onOpenSettings={() => {
+            setSettingsTab('library');
+            setSettingsOpen(true);
+          }}
         />
       ) : openedPaper === null ? null : (
         <div className="app-shell">
@@ -586,7 +595,12 @@ export default function App(): React.JSX.Element {
         </div>
       )}
 
-      {settingsOpen && <SettingsDialog onClose={() => setSettingsOpen(false)} />}
+      {settingsOpen && (
+        <SettingsDialog
+          initialTab={settingsTab}
+          onClose={() => setSettingsOpen(false)}
+        />
+      )}
     </div>
   );
 }

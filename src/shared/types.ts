@@ -169,6 +169,21 @@ export interface LegacyMigrationSummary {
   skipped: LegacyMigrationSkippedPaper[];
 }
 
+/** A paper that stayed unmanaged because it could not be adopted before a root change. */
+export interface RootChangeUnmanagedPaper {
+  paperId: number;
+  title: string;
+}
+
+/** Outcome of moving the managed library to a new root directory. */
+export interface RootChangeResult {
+  root: string;
+  migrated: number;
+  unmanaged: RootChangeUnmanagedPaper[];
+  /** Old copies are always kept; the renderer tells the user they may clean up. */
+  keptOldCopies: true;
+}
+
 /** Library root state shown in the library and settings pages. */
 export interface StorageInfo {
   root: string;

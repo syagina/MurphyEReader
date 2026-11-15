@@ -73,9 +73,17 @@ const api: PaperLensApi = {
     set: (input) => ipcRenderer.invoke('settings:set', input),
     test: (input) => ipcRenderer.invoke('settings:test', input),
   },
+  appSettings: {
+    get: () => ipcRenderer.invoke('appSettings:get'),
+    update: (patch) => ipcRenderer.invoke('appSettings:update', patch),
+  },
   storage: {
     getInfo: () => ipcRenderer.invoke('storage:getInfo'),
     migrateLegacy: () => ipcRenderer.invoke('storage:migrateLegacy'),
+    chooseRoot: () => ipcRenderer.invoke('storage:chooseRoot'),
+    changeRoot: (newRoot) => ipcRenderer.invoke('storage:changeRoot', newRoot),
+    openRoot: () => ipcRenderer.invoke('storage:openRoot'),
+    revealPaper: (paperId) => ipcRenderer.invoke('storage:revealPaper', paperId),
     onBusy: (cb) => subscribe('storage:busy', cb),
     onMigrated: (cb) => subscribe('storage:migrated', cb),
   },

@@ -1,6 +1,8 @@
 import type {
   AiSettings,
   AiSettingsInput,
+  AppSettings,
+  AppSettingsUpdate,
   ChatMessage,
   ChatSendRequest,
   Conversation,
@@ -11,6 +13,7 @@ import type {
   NoteType,
   Paper,
   PdfExportJob,
+  RootChangeResult,
   SearchResult,
   StorageInfo,
 } from './types';
@@ -100,9 +103,17 @@ export interface PaperLensApi {
     set(input: AiSettingsInput): Promise<AiSettings>;
     test(input: AiSettingsInput): Promise<{ ok: boolean; error?: string }>;
   };
+  appSettings: {
+    get(): Promise<AppSettings>;
+    update(patch: AppSettingsUpdate): Promise<AppSettings>;
+  };
   storage: {
     getInfo(): Promise<StorageInfo>;
     migrateLegacy(): Promise<LegacyMigrationSummary>;
+    chooseRoot(): Promise<string | null>;
+    changeRoot(newRoot: string): Promise<RootChangeResult>;
+    openRoot(): Promise<void>;
+    revealPaper(paperId: number): Promise<void>;
     onBusy(cb: (state: JobState) => void): () => void;
     onMigrated(cb: (summary: LegacyMigrationSummary) => void): () => void;
   };

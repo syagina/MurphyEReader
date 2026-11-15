@@ -69,9 +69,11 @@ export function LibraryView({
   const storageError = useStorageStore((state) => state.error);
   const lastMigration = useStorageStore((state) => state.lastMigration);
   const storageTask = useStorageStore((state) => state.busy.storageTask);
+  const revealPaper = useStorageStore((state) => state.revealPaper);
   const dismissStorageError = useStorageStore((state) => state.dismissError);
   const dismissMigrationNotice = useStorageStore((state) => state.dismissMigrationNotice);
-  const storageBannerError = storageInfo?.error ?? storageError;
+  // A renderer action failure is newer than the last main-process snapshot.
+  const storageBannerError = storageError ?? storageInfo?.error ?? null;
   const storageBusy = storageTask !== null;
 
   const [queryText, setQueryText] = useState('');
@@ -177,6 +179,11 @@ export function LibraryView({
   const handleRelocate = (paper: Paper, version: 'original' | 'translated'): void => {
     setOpenMenuId(null);
     void runAction(() => relocate(paper.id, version));
+  };
+
+  const handleReveal = (paper: Paper): void => {
+    setOpenMenuId(null);
+    void runAction(() => revealPaper(paper.id));
   };
 
   const handleDelete = (paper: Paper): void => {
@@ -572,6 +579,13 @@ export function LibraryView({
                           onClick={() => handleOpen(paper)}
                         >
                           打开
+                        </button>
+                        <button
+                          type="button"
+                          className="menu-button"
+                          onClick={() => handleReveal(paper)}
+                        >
+                          打开所在文件夹
                         </button>
                         <button
                           type="button"
