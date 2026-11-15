@@ -33,6 +33,26 @@ describe('JobRegistry', () => {
     expect(states.length).toBeGreaterThan(0);
   });
 
+  it('变更根目录要求存储任务与工具任务都空闲', () => {
+    const jobs = new JobRegistry();
+
+    jobs.tryAcquireTool('install', 'job-x');
+    expect(() => jobs.tryAcquireChangeRoot()).toThrow(BUSY);
+    expect(jobs.getState()).toMatchObject({
+      storageTask: null,
+      toolTask: 'install',
+      toolJobId: 'job-x',
+    });
+
+    jobs.releaseTool('job-x');
+    jobs.tryAcquireChangeRoot();
+    expect(jobs.getState()).toMatchObject({
+      storageTask: 'changeRoot',
+      toolTask: null,
+    });
+    jobs.releaseStorage();
+  });
+
   it('每次状态变化都通知监听者，状态是完整快照', () => {
     const states: JobState[] = [];
     const jobs = new JobRegistry((state) => states.push(state));

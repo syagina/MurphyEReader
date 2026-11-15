@@ -83,6 +83,11 @@ export class JobRegistry {
   }
 
   tryAcquireChangeRoot(): void {
+    // A root change rewrites every managed path, so no storage task and no
+    // tool job (install/warmup/whole-paper translation) may be running.
+    if (this.storageTask !== null || this.toolTask !== null) {
+      throw new Error(BUSY_MESSAGE);
+    }
     this.tryAcquireStorage('changeRoot');
   }
 

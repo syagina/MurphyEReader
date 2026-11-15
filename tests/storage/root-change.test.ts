@@ -315,4 +315,24 @@ describe('changeLibraryRoot', () => {
     expect(getStoredAppSettings(db, documentsDir).libraryRoot).toBe(oldRoot);
     expect(jobs.getState().storageTask).toBeNull();
   });
+
+  it('工具任务进行中时报忙，设置与文献路径不变', async () => {
+    const imported = await makeLibrary(oldRoot).importPaper(SAMPLE_TEXT_PDF);
+    jobs.tryAcquireTool('install', 'job-x');
+
+    try {
+      await expect(changeLibraryRoot(db, jobs, oldRoot, newRoot)).rejects.toThrow(BUSY);
+    } finally {
+      jobs.releaseTool('job-x');
+    }
+
+    expect(getStoredAppSettings(db, documentsDir).libraryRoot).toBe(oldRoot);
+    expect(getPaper(db, imported.paper.id)?.filePathOriginal).toBe(
+      imported.paper.filePathOriginal,
+    );
+    expect(existsSync(storageFile(newRoot, imported.paper.storageDir!, ORIGINAL_PDF_NAME))).toBe(
+      false,
+    );
+    expect(jobs.getState().storageTask).toBeNull();
+  });
 });
