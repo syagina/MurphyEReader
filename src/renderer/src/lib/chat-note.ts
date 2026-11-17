@@ -22,6 +22,42 @@ export function findAssistantSourcePage(
   return null;
 }
 
+/** Where an AI answer's sticky note should land. */
+export interface AssistantAnchorTarget {
+  /** Source page of the nearest earlier user question, else the open page. */
+  pageNo: number;
+  /** The question's selected text, when it had one. */
+  selectionText?: string;
+}
+
+/**
+ * Sticky notes for AI answers follow the question that produced them: the
+ * nearest earlier user message supplies the source page and, when present,
+ * the selected text whose highlight the note may reuse. Missing metadata
+ * degrades to the page the reader is currently showing.
+ */
+export function findAssistantAnchor(
+  messages: Pick<ChatMessage, 'id' | 'role' | 'pageNo' | 'selectionText'>[],
+  messageId: number,
+  currentPage: number,
+): AssistantAnchorTarget {
+  const index = messages.findIndex((message) => message.id === messageId);
+  if (index < 0) {
+    return { pageNo: currentPage };
+  }
+  for (let cursor = index - 1; cursor >= 0; cursor -= 1) {
+    const message = messages[cursor];
+    if (message !== undefined && message.role === 'user') {
+      const pageNo = message.pageNo ?? currentPage;
+      const selectionText = message.selectionText?.trim();
+      return selectionText !== undefined && selectionText !== ''
+        ? { pageNo, selectionText }
+        : { pageNo };
+    }
+  }
+  return { pageNo: currentPage };
+}
+
 function firstContentLine(markdown: string): string {
   const line = markdown
     .split('\n')

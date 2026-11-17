@@ -13,9 +13,24 @@ import type { ThrottledEmitter } from '../jobs/throttle';
 
 const DEFAULT_THROTTLE_MS = 250;
 const REDACTED = '[REDACTED]';
+/**
+ * BabelDOC is a Python/Rich process. On Chinese Windows its stderr defaults to
+ * GBK, while MurphyEReader decodes UTF-8, which produced mojibake paths and
+ * `UnicodeEncodeError` tracebacks from Rich's logging handler. Force UTF-8 and
+ * a plain, wide output stream so progress lines stay readable.
+ */
+const CHILD_ENV: NodeJS.ProcessEnv = {
+  ...process.env,
+  PYTHONIOENCODING: 'utf-8',
+  PYTHONUTF8: '1',
+  PYTHONUNBUFFERED: '1',
+  COLUMNS: '200',
+  NO_COLOR: '1',
+};
 const SPAWN_OPTIONS: SpawnOptions = {
   windowsHide: true,
   stdio: ['ignore', 'pipe', 'pipe'],
+  env: CHILD_ENV,
 };
 // Batch shims are pre-quoted into one cmd.exe /c argument by
 // buildCommandInvocation; libuv must not escape those quotes again.
@@ -157,7 +172,10 @@ export class ToolJobRunner {
         state.stream.on('data', (chunk: Buffer | string) => {
           const buffer = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
           state.buffer += state.decoder.write(buffer);
-          const parts = state.buffer.split('\n');
+          // BabelDOC's rich progress refreshes lines with a bare carriage
+          // return inside a pipe. Splitting on both keeps those intermediate
+          // updates from being held back until the process exits.
+          const parts = state.buffer.split(/\r\n|\r|\n/);
           state.buffer = parts.pop() ?? '';
           for (const part of parts) {
             handleLine(part);

@@ -11,6 +11,7 @@ import { copyFile, mkdir, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import type Database from 'better-sqlite3';
+import { PDFDocument } from 'pdf-lib';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openDb } from '@main/db';
 import { replacePages } from '@main/db/pages';
@@ -26,6 +27,7 @@ import {
 } from '@main/storage/paths';
 import { PaperTranslationService } from '@main/translation/paper-translation';
 import type { PaperTranslationDeps } from '@main/translation/paper-translation';
+import { TRANSLATION_OUTPUT_INCOMPLETE } from '@shared/translation';
 import type {
   Paper,
   ToolRunOptions,
@@ -46,7 +48,35 @@ const pdfExtractActual = vi.hoisted(() => ({
 vi.mock('@main/pdf/extract', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@main/pdf/extract')>();
   pdfExtractActual.getPdfPageCount = actual.getPdfPageCount;
-  return { ...actual, getPdfPageCount: vi.fn(actual.getPdfPageCount) };
+  return {
+    ...actual,
+    getPdfPageCount: vi.fn(actual.getPdfPageCount),
+    // BabelDOC outputs in these tests are copies of English fixture PDFs.
+    // Extraction keeps page geometry and emptiness (so the lost-page test still
+    // works) but gives every non-empty page a Chinese text layer, which is what
+    // the real preserved-layout output contains.
+    extractPdf: vi.fn(async (filePath: string) => {
+      const result = await actual.extractPdf(filePath);
+      const normalized = filePath.replace(/\\/g, '/');
+      if (
+        !normalized.endsWith('.mono.pdf') &&
+        !normalized.endsWith('.dual.pdf')
+      ) {
+        return result;
+      }
+      return {
+        ...result,
+        pages: result.pages.map((page) =>
+          page.text.trim() === ''
+            ? page
+            : {
+                ...page,
+                text: '这是一段完整的中文译文，用于验证翻译覆盖检查。'.repeat(40),
+              },
+        ),
+      };
+    }),
+  };
 });
 
 const mockedGetPdfPageCount = vi.mocked(getPdfPageCount);
@@ -68,10 +98,8 @@ const AI_CONFIG = {
   temperature: 0.7,
 };
 
-const ENGLISH_TEXT =
-  'This deterministic filler prose stays in English so the whole-paper check accepts it. '.repeat(
-    80,
-  );
+const SHORT_ENGLISH_TEXT =
+  'This short English text is enough for the whole-paper Chinese check. '.repeat(6);
 const CHINESE_TEXT = '这是一篇中文文献的正文，用来验证整篇翻译之前的中文检测。'.repeat(200);
 
 interface FakeRunner {
@@ -143,6 +171,15 @@ async function writeOutputs(
   return { config, args: args.join(' '), outDir };
 }
 
+/** Writes a PDF with blank pages, simulating a mono output that lost content. */
+async function writeBlankPdf(target: string, pageCount: number): Promise<void> {
+  const doc = await PDFDocument.create();
+  for (let index = 0; index < pageCount; index += 1) {
+    doc.addPage([612, 792]);
+  }
+  writeFileSync(target, await doc.save());
+}
+
 function defaultRunner(): FakeRunner {
   return makeFakeRunner(async (options) => {
     await writeOutputs(options, {
@@ -166,6 +203,11 @@ function makeService(
     tempRoot,
     getEnginePath: async () => 'C:\\Tools\\babeldoc.exe',
     getAiConfig: () => ({ ...AI_CONFIG }),
+    getTranslationOptions: () => ({
+      qps: 8,
+      workers: 16,
+      autoExtractGlossary: true,
+    }),
     emit,
     ...overrides,
   });
@@ -258,13 +300,24 @@ describe('PaperTranslationService.start', () => {
     expect(existsSync(storageFile(root, bound.storageDir!, BABELDOC_DUAL_NAME))).toBe(true);
     expect(bound.pageCountTranslated).toBe(2);
     expect(bound.lastPageTranslated).toBe(1);
-    expect(captured!.config).toContain('openai-api-key = "sk-secret"');
+    expect(captured!.config).not.toContain('sk-secret');
+    expect(captured!.config).not.toContain('https://relay/v1');
+    expect(captured!.config).toMatch(
+      /openai-base-url = "http:\/\/127\.0\.0\.1:\d+\/v1"/,
+    );
+    const proxyKey = /openai-api-key = "([0-9a-f]{48})"/.exec(captured!.config);
+    expect(proxyKey).not.toBeNull();
     expect(captured!.config).toContain('lang-out = "zh-CN"');
     expect(captured!.config).toContain('openai-model = "gpt-4o"');
-    expect(captured!.config).toContain('openai-base-url = "https://relay/v1"');
-    expect(captured!.config).toContain('qps = 4');
+    expect(captured!.config).toContain('qps = 8');
+    expect(captured!.config).toContain('pool-max-workers = 16');
+    expect(captured!.config).toContain('term-pool-max-workers = 16');
+    expect(captured!.config).not.toContain('no-auto-extract-glossary');
     expect(captured!.args).not.toContain('sk-secret');
-    expect(captured!.redact).toEqual(['sk-secret']);
+    expect(captured!.args).not.toContain(proxyKey![1]);
+    expect(captured!.redact).toEqual(
+      expect.arrayContaining(['sk-secret', proxyKey![1]]),
+    );
 
     expect(readdirSync(tempRoot)).toEqual([]);
     expect(service.getState()).toBeNull();
@@ -278,8 +331,40 @@ describe('PaperTranslationService.start', () => {
     expect(progress.some((event) => event.percent === 42 && event.line.includes('42%'))).toBe(
       true,
     );
-    // The API key never appears in any event payload.
+    // Neither the real key nor the local relay credential reaches an event.
     expect(JSON.stringify(events)).not.toContain('sk-secret');
+    expect(JSON.stringify(events)).not.toContain(proxyKey![1]);
+  });
+
+  it('把设置中的 QPS、线程数和术语提取开关写入本次翻译配置', async () => {
+    const { paper } = await library.importPaper(SAMPLE_TEXT_PDF);
+    let config = '';
+    const runner = makeFakeRunner(async (options) => {
+      const written = await writeOutputs(options, {
+        mono: 'original.zh-CN.mono.pdf',
+        dual: 'original.zh-CN.dual.pdf',
+      });
+      config = written.config;
+      return ok({ lines: [] });
+    });
+
+    const service = makeService(
+      {
+        getTranslationOptions: () => ({
+          qps: 12,
+          workers: 24,
+          autoExtractGlossary: false,
+        }),
+      },
+      runner,
+    );
+    await service.start(paper.id);
+    await service.waitForIdle();
+
+    expect(config).toContain('qps = 12');
+    expect(config).toContain('pool-max-workers = 24');
+    expect(config).toContain('term-pool-max-workers = 24');
+    expect(config).toContain('no-auto-extract-glossary = true');
   });
 
   it('翻译失败时保留旧译本的路径和内容', async () => {
@@ -414,7 +499,7 @@ describe('PaperTranslationService.start', () => {
   });
 
   it('未托管文献先整理再翻译，且任务使用整理后的原文路径', async () => {
-    const paper = createExternalPaper(ENGLISH_TEXT);
+    const paper = createExternalPaper(SHORT_ENGLISH_TEXT);
     let filesArg = '';
     const runner = makeFakeRunner(async (options) => {
       const args = options.command.args;
@@ -528,6 +613,95 @@ describe('PaperTranslationService outputs', () => {
     expect(leftovers).toEqual([]);
   });
 
+  it('参考文献页也交给 BabelDOC 翻译并绑定 mono', async () => {
+    const { paper } = await library.importPaper(SAMPLE_TEXT_PDF);
+    replacePages(db, paper.id, [
+      { pageNo: 1, text: 'Body prose. '.repeat(150) },
+      {
+        pageNo: 2,
+        text: `References\n${'Entry text. '.repeat(150)}\nEntry two.`,
+      },
+    ]);
+    let args: string[] = [];
+    const runner = makeFakeRunner(async (options) => {
+      args = options.command.args;
+      await writeOutputs(options, {
+        mono: 'original.zh-CN.mono.pdf',
+        dual: 'original.zh-CN.dual.pdf',
+      });
+      return ok();
+    });
+    const service = makeService({}, runner);
+
+    await service.start(paper.id);
+    await service.waitForIdle();
+
+    const bound = getPaper(db, paper.id)!;
+    expect(args).not.toContain('--pages');
+    expect(bound.filePathTranslated).toBe(
+      storageFile(root, bound.storageDir!, BABELDOC_MONO_NAME),
+    );
+    const done = eventsOf<{ message?: string }>('translation:done');
+    expect(done[0].message).toBe('翻译完成');
+  });
+
+  it('mono 丢失页面时改用 dual 绑定并提示', async () => {
+    const { paper } = await library.importPaper(SAMPLE_TEXT_PDF);
+    replacePages(db, paper.id, [
+      { pageNo: 1, text: 'Body prose. '.repeat(150) },
+      { pageNo: 2, text: 'More body prose. '.repeat(100) },
+    ]);
+    const runner = makeFakeRunner(async (options) => {
+      const args = options.command.args;
+      const outDir = args[args.indexOf('--output') + 1];
+      await mkdir(outDir, { recursive: true });
+      await writeBlankPdf(join(outDir, 'original.zh-CN.mono.pdf'), 2);
+      await copyFile(SAMPLE_TEXT_PDF, join(outDir, 'original.zh-CN.dual.pdf'));
+      return ok();
+    });
+    const service = makeService({}, runner);
+
+    await service.start(paper.id);
+    await service.waitForIdle();
+
+    const bound = getPaper(db, paper.id)!;
+    expect(bound.filePathTranslated).toBe(
+      storageFile(root, bound.storageDir!, BABELDOC_DUAL_NAME),
+    );
+    expect(bound.pageCountTranslated).toBe(2);
+    expect(existsSync(bound.filePathTranslated!)).toBe(true);
+    const done = eventsOf<{
+      message?: string;
+      paper: Paper;
+    }>('translation:done');
+    expect(done).toHaveLength(1);
+    expect(done[0].message).toBe('翻译完成（已改用双语对照版，避免内容遗漏）');
+  });
+
+  it('mono 丢失页面且没有 dual 时以中文消息失败', async () => {
+    const { paper } = await library.importPaper(SAMPLE_TEXT_PDF);
+    replacePages(db, paper.id, [
+      { pageNo: 1, text: 'Body prose. '.repeat(150) },
+      { pageNo: 2, text: 'More body prose. '.repeat(100) },
+    ]);
+    const runner = makeFakeRunner(async (options) => {
+      const args = options.command.args;
+      const outDir = args[args.indexOf('--output') + 1];
+      await mkdir(outDir, { recursive: true });
+      await writeBlankPdf(join(outDir, 'original.zh-CN.mono.pdf'), 2);
+      return ok();
+    });
+    const service = makeService({}, runner);
+
+    await service.start(paper.id);
+    await service.waitForIdle();
+
+    expect(getPaper(db, paper.id)!.filePathTranslated).toBeNull();
+    const failed = eventsOf<TranslationFailedEvent>('translation:failed');
+    expect(failed).toHaveLength(1);
+    expect(failed[0].message).toBe(TRANSLATION_OUTPUT_INCOMPLETE);
+  });
+
   it('TOML 值会转义反斜杠、引号并压平控制字符', async () => {
     const { paper } = await library.importPaper(SAMPLE_TEXT_PDF);
     let config = '';
@@ -551,9 +725,12 @@ describe('PaperTranslationService outputs', () => {
     await service.waitForIdle();
 
     const keyLines = config.split('\n').filter((line) => line.startsWith('openai-api-key'));
-    expect(keyLines).toEqual(['openai-api-key = "sk-secret"']);
+    expect(keyLines).toHaveLength(1);
+    expect(keyLines[0]).toMatch(/^openai-api-key = "[0-9a-f]{48}"$/);
+    expect(config).not.toContain('sk-secret');
+    expect(config).not.toContain('stolen');
     expect(config).toContain('openai-model = "gpt-4o\\\\beta\\"x"');
-    expect(config).toContain('openai-base-url = "https://relay/v1 openai-api-key = \\"stolen\\""');
+    expect(config).toMatch(/openai-base-url = "http:\/\/127\.0\.0\.1:\d+\/v1"/);
   });
 });
 
@@ -691,6 +868,80 @@ describe('PaperTranslationService cancellation checkpoints', () => {
     expect(eventsOf('translation:done')).toHaveLength(0);
     expectNoBindingLeftovers(storageDir);
     expect(jobs.getState().toolTask).toBeNull();
+  });
+
+  it('引擎长时间无输出时发送中文心跳，并在 10 秒后写入日志', async () => {
+    const { paper } = await library.importPaper(SAMPLE_TEXT_PDF);
+    const gate = deferred<ToolRunResult>();
+    const armed = deferred<void>();
+    const runner = makeFakeRunner(async () => {
+      armed.resolve();
+      return gate.promise;
+    });
+    const service = makeService({}, runner);
+
+    vi.useFakeTimers();
+    try {
+      await service.start(paper.id);
+      // The heartbeat interval is created immediately before runner.run.
+      await armed.promise;
+      const before = eventsOf<TranslationProgressEvent>('translation:progress').length;
+
+      await vi.advanceTimersByTimeAsync(3_000);
+
+      const first = eventsOf<TranslationProgressEvent>('translation:progress');
+      expect(first).toHaveLength(before + 1);
+      expect(first.at(-1)).toMatchObject({
+        jobId: expect.any(String),
+        paperId: paper.id,
+        percent: null,
+        appendLog: false,
+      });
+      expect(first.at(-1)!.line).toContain('正在解析 PDF 并准备翻译…');
+      expect(first.at(-1)!.line).toContain('已用时');
+      expect(service.getState()?.logs).toEqual([]);
+
+      // The engine stays silent; the next heartbeat after the 10-second
+      // threshold must reach the log panel instead of only the headline.
+      await vi.advanceTimersByTimeAsync(9_000);
+
+      const later = eventsOf<TranslationProgressEvent>('translation:progress');
+      expect(later.at(-1)).toMatchObject({ appendLog: true });
+      expect(later.at(-1)!.line).toContain('正在解析 PDF 并准备翻译…');
+      expect(service.getState()?.logs).toEqual([later.at(-1)!.line]);
+    } finally {
+      gate.resolve(ok({ canceled: true }));
+      await service.waitForIdle();
+      vi.useRealTimers();
+    }
+  });
+
+  it('心跳报告 BabelDOC 当前阶段和阶段进度', async () => {
+    const { paper } = await library.importPaper(SAMPLE_TEXT_PDF);
+    const gate = deferred<ToolRunResult>();
+    const armed = deferred<ToolRunOptions>();
+    const runner = makeFakeRunner(async (options) => {
+      armed.resolve(options);
+      return gate.promise;
+    });
+    const service = makeService({}, runner);
+
+    vi.useFakeTimers();
+    try {
+      await service.start(paper.id);
+      const options = await armed.promise;
+      options.onLine?.('Typesetting output', 80);
+
+      await vi.advanceTimersByTimeAsync(3_000);
+
+      const progress = eventsOf<TranslationProgressEvent>('translation:progress');
+      expect(progress.at(-1)!.line).toContain('正在按原文版式排版：80%');
+      expect(progress.at(-1)!.line).toContain('已用时');
+    } finally {
+      gate.resolve(ok({ canceled: true }));
+      await service.waitForIdle();
+      vi.useRealTimers();
+    }
   });
 
   it('空闲前 getState 返回运行中的任务快照，空闲后返回 null', async () => {

@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 
-export const SCHEMA_VERSION = 2;
+export const SCHEMA_VERSION = 4;
 
 export const MIGRATION_V1 = `
 CREATE TABLE papers (
@@ -56,6 +56,33 @@ ALTER TABLE papers ADD COLUMN file_hash TEXT;
 ALTER TABLE papers ADD COLUMN storage_dir TEXT;
 CREATE INDEX IF NOT EXISTS idx_papers_folder ON papers(folder_id);
 CREATE INDEX IF NOT EXISTS idx_papers_hash ON papers(file_hash);
+`;
+
+export const MIGRATION_V3 = `
+CREATE TABLE IF NOT EXISTS sticky_notes (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  paper_id INTEGER NOT NULL REFERENCES papers(id) ON DELETE CASCADE,
+  pdf_version TEXT NOT NULL CHECK (pdf_version IN ('original','translated','bilingual')),
+  page_no INTEGER NOT NULL CHECK (page_no >= 1),
+  quote TEXT NOT NULL DEFAULT '',
+  content_md TEXT NOT NULL DEFAULT '',
+  anchor_json TEXT NOT NULL,
+  source TEXT NOT NULL CHECK (source IN ('manual','translation','ai')),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_sticky_notes_paper_version_page
+  ON sticky_notes(paper_id, pdf_version, page_no);
+`;
+
+export const MIGRATION_V4 = `
+ALTER TABLE sticky_notes ADD COLUMN kind TEXT NOT NULL DEFAULT 'note';
+ALTER TABLE sticky_notes ADD COLUMN mark_style TEXT NOT NULL DEFAULT 'highlight';
+ALTER TABLE sticky_notes ADD COLUMN color TEXT;
+ALTER TABLE sticky_notes ADD COLUMN pin_json TEXT;
+ALTER TABLE sticky_notes ADD COLUMN popup_json TEXT;
+ALTER TABLE sticky_notes ADD COLUMN drawing_json TEXT;
 `;
 
 interface FtsTable {
@@ -153,6 +180,14 @@ export function migrate(db: Database.Database): void {
     if (userVersion < 2) {
       db.exec(MIGRATION_V2);
       db.pragma('user_version = 2');
+    }
+    if (userVersion < 3) {
+      db.exec(MIGRATION_V3);
+      db.pragma('user_version = 3');
+    }
+    if (userVersion < 4) {
+      db.exec(MIGRATION_V4);
+      db.pragma('user_version = 4');
     }
     ensureFtsObjects(db);
   })();

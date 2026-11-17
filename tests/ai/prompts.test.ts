@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { Note } from '@shared/types';
 import {
   ASK_SYSTEM_PROMPT,
+  CONVERSATION_SYSTEM_PROMPT,
   DEPTH_SYSTEM_PROMPT,
   INNOVATION_SYSTEM_PROMPT,
   SUMMARY_MINI_SYSTEM_PROMPT,
@@ -28,6 +29,13 @@ describe('系统提示词', () => {
   it('ASK_SYSTEM_PROMPT 要求中文回答并包含 [p.N] 引用格式', () => {
     expect(ASK_SYSTEM_PROMPT).toContain('中文');
     expect(ASK_SYSTEM_PROMPT).toContain('[p.N]');
+  });
+
+  it('CONVERSATION_SYSTEM_PROMPT 说明纯聊天模式并引导按需切换上下文', () => {
+    expect(CONVERSATION_SYSTEM_PROMPT).toContain('纯聊天');
+    expect(CONVERSATION_SYSTEM_PROMPT).toContain('仅本页');
+    expect(CONVERSATION_SYSTEM_PROMPT).toContain('全文');
+    expect(CONVERSATION_SYSTEM_PROMPT).toContain('[p.N]');
   });
 
   it('DEPTH_SYSTEM_PROMPT 包含五个段名', () => {

@@ -6,9 +6,9 @@ import { stripIpcErrorPrefix } from '../lib/errors';
 import {
   collectTags,
   filterAndSortPapers,
-  isPaperMissing,
   isTranslatedBound,
   libraryStats,
+  missingKind,
   readingProgress,
 } from '../lib/library-view';
 import type { FolderFilter, LibraryFilter, LibrarySort } from '../lib/library-view';
@@ -73,6 +73,7 @@ export function LibraryView({
   const loading = useLibraryStore((state) => state.loading);
   const fileStatus = useLibraryStore((state) => state.fileStatus);
   const load = useLibraryStore((state) => state.load);
+  const refreshFileStatus = useLibraryStore((state) => state.refreshFileStatus);
   const importPaper = useLibraryStore((state) => state.importPaper);
   const attachTranslated = useLibraryStore((state) => state.attachTranslated);
   const relocate = useLibraryStore((state) => state.relocate);
@@ -127,9 +128,59 @@ export function LibraryView({
     });
   }, [load]);
 
+  // Bound files live on disk, so they can be restored or removed while this
+  // page stays mounted. Re-check them when the window regains focus instead
+  // of keeping a stale "missing" badge until the next full reload.
+  useEffect(() => {
+    const refresh = (): void => {
+      void refreshFileStatus().catch(() => undefined);
+    };
+    const refreshWhenVisible = (): void => {
+      if (document.visibilityState === 'visible') {
+        refresh();
+      }
+    };
+    window.addEventListener('focus', refresh);
+    document.addEventListener('visibilitychange', refreshWhenVisible);
+    return () => {
+      window.removeEventListener('focus', refresh);
+      document.removeEventListener('visibilitychange', refreshWhenVisible);
+    };
+  }, [refreshFileStatus]);
+
   useEffect(() => {
     setOpenMenuId(null);
   }, [papers.length]);
+
+  // Clicking blank space (or anywhere outside the open menu) dismisses it.
+  // Ignoring the toggle keeps the toggle's own click responsible for opening
+  // or closing, including on another card.
+  useEffect(() => {
+    if (openMenuId === null) {
+      return;
+    }
+    const handlePointerDown = (event: PointerEvent): void => {
+      const target = event.target;
+      if (
+        target instanceof Element &&
+        target.closest('.paper-menu, .card-menu-toggle') !== null
+      ) {
+        return;
+      }
+      setOpenMenuId(null);
+    };
+    const handleKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === 'Escape') {
+        setOpenMenuId(null);
+      }
+    };
+    document.addEventListener('pointerdown', handlePointerDown, true);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('pointerdown', handlePointerDown, true);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [openMenuId]);
 
   // A deleted folder must not leave the list filtered by a missing id.
   useEffect(() => {
@@ -204,7 +255,10 @@ export function LibraryView({
         if (result === null) {
           return;
         }
-        if (result.duplicate) {
+        if (result.restored === true) {
+          setSelectedId(result.paper.id);
+          setNotice('文献文件已重新导入，原有记录与笔记已保留');
+        } else if (result.duplicate) {
           setSelectedId(result.paper.id);
           setNotice('已在文献库中，已为你选中');
         }
@@ -229,6 +283,29 @@ export function LibraryView({
 
   const handleOpen = (paper: Paper): void => {
     setOpenMenuId(null);
+    // Opening a paper whose file was deleted outside the app would surface a
+    // raw file-not-found error. Point at the recovery path instead: importing
+    // the same PDF restores this exact record with its notes and tags.
+    if (fileStatus[paper.id]?.originalExists === false) {
+      // The snapshot may predate the user restoring the file in Explorer.
+      void (async () => {
+        try {
+          await refreshFileStatus();
+        } catch {
+          // Fall through to the cached status when the check itself fails.
+        }
+        const fresh = useLibraryStore.getState().fileStatus[paper.id];
+        if (fresh?.originalExists === false) {
+          setSelectedId(paper.id);
+          setError(null);
+          setNotice('原文文件缺失：重新导入同一 PDF 即可恢复此记录，笔记和标签会保留');
+          return;
+        }
+        setSelectedId(null);
+        onOpen(paper);
+      })();
+      return;
+    }
     setSelectedId(null);
     onOpen(paper);
   };
@@ -360,7 +437,7 @@ export function LibraryView({
     <section className="library-page" aria-labelledby="library-heading">
       <header className="library-page-header">
         <div>
-          <p className="library-kicker">PaperLens</p>
+          <p className="library-kicker">MurphyEReader</p>
           <h1 className="library-heading" id="library-heading">
             文献库
           </h1>
@@ -613,7 +690,7 @@ export function LibraryView({
               {visiblePapers.map((paper) => {
                 const status = fileStatus[paper.id];
                 const translated = isTranslatedBound(paper);
-                const missing = isPaperMissing(paper, status);
+                const missing = missingKind(paper, status);
                 const progress = readingProgress(paper);
                 const folderName =
                   paper.folderId == null ? null : (folderNames.get(paper.folderId) ?? null);
@@ -626,6 +703,7 @@ export function LibraryView({
                       layout === 'list' ? 'library-card-list' : '',
                       selectedId === paper.id ? 'selected' : '',
                       isActive ? 'active-paper' : '',
+                      openMenuId === paper.id ? 'menu-open' : '',
                     ]
                       .filter(Boolean)
                       .join(' ')}
@@ -647,7 +725,11 @@ export function LibraryView({
                     <div className="library-card-head">
                       <div className="library-card-badges">
                         {isActive && <span className="library-badge active">正在阅读</span>}
-                        {missing && <span className="library-badge warning">文件缺失</span>}
+                        {missing !== null && (
+                          <span className="library-badge warning">
+                            {missing === 'translation' ? '译本缺失' : '原文缺失'}
+                          </span>
+                        )}
                         {translated && <span className="library-badge accent">中英对照</span>}
                         {folderName !== null && (
                           <span className="library-badge folder" title={folderName}>

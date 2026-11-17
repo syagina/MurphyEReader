@@ -61,11 +61,11 @@ export function OutlinePanel({
         <button
           type="button"
           className="outline-close"
-          aria-label="隐藏大纲"
-          title="隐藏大纲"
+          aria-label="收起大纲"
+          title="收起大纲"
           onClick={onClose}
         >
-          «
+          收起
         </button>
       </div>
       {outline.length === 0 ? (

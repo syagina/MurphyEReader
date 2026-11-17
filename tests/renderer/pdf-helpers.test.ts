@@ -109,7 +109,9 @@ describe('getSelectionInPage', () => {
     selection?.removeAllRanges();
     selection?.addRange(range);
 
-    expect(getSelectionInPage(pageRoot)).toEqual({ text: '有限元空间' });
+    const selected = getSelectionInPage(pageRoot);
+    expect(selected).toMatchObject({ text: '有限元空间' });
+    expect(selected?.range).toBeInstanceOf(Range);
   });
 
   it('没有选区或选区在页面之外时返回 null', () => {

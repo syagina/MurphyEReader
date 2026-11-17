@@ -3,20 +3,39 @@ import {
   AI_PANEL_DEFAULT_WIDTH,
   AI_PANEL_MIN_WIDTH,
   aiPanelMaxWidth,
+  clampAiFloatingBounds,
   clampAiPanelWidth,
+  defaultAiFloatingBounds,
+  moveAiFloatingBounds,
+  resizeAiFloatingBounds,
   resizeAiPanelWidth,
+  type AiPanelFloatingBounds,
+  type AiPanelLayout,
 } from '@shared/ai-panel';
-import type { Paper, SearchResult } from '@shared/types';
+import type { Paper, SearchResult, StickyNote } from '@shared/types';
 import { ChatPanel } from './components/ChatPanel';
 import { LibraryView } from './components/LibraryView';
 import { NotesPanel } from './components/NotesPanel';
+import { Onboarding } from './components/Onboarding';
 import { OutlinePanel } from './components/OutlinePanel';
 import { PdfViewer } from './components/PdfViewer';
 import { SearchPanel } from './components/SearchPanel';
 import { SettingsDialog } from './components/SettingsDialog';
 import type { SettingsTab } from './components/SettingsDialog';
+import { StickyNotesPanel } from './components/StickyNotesPanel';
+import { ThemeSwitcher } from './components/ThemeSwitcher';
+import { TranslationStatusButton } from './components/TranslationStatusButton';
 import { TranslationStatusCard } from './components/TranslationStatusCard';
+import {
+  readAiFloatingBounds,
+  readAiPanelLayout,
+  writeAiFloatingBounds,
+  writeAiPanelLayout,
+} from './lib/ai-panel-layout';
 import { errorMessage } from './lib/errors';
+import { resolveOnboardingVisibility } from './lib/onboarding';
+import { applyPaperTexture } from './lib/paper-texture';
+import { applyTheme } from './lib/theme';
 import { useAppSettingsStore } from './stores/app-settings';
 import { useChatStore } from './stores/chat';
 import { useLibraryStore } from './stores/library';
@@ -25,10 +44,17 @@ import { useReaderStore } from './stores/reader';
 import type { ReaderSelection } from './stores/reader';
 import { useSearchStore } from './stores/search';
 import { useSettingsStore } from './stores/settings';
+import { useStickyNotesStore } from './stores/sticky-notes';
 import { useStorageStore } from './stores/storage';
 import { useTranslationStore } from './stores/translation';
 
-type AiTab = 'chat' | 'notes';
+type AiTab = 'chat' | 'notes' | 'sticky';
+type OnboardingGate = 'checking' | 'open' | 'closed';
+
+/** Collapsed floating chrome stays wide enough for its title and expand button. */
+const AI_FLOATING_COLLAPSED_WIDTH = 160;
+/** Tall enough for the panel bar's 44px minimum plus the floating border. */
+const AI_FLOATING_COLLAPSED_HEIGHT = 48;
 
 interface ConceptPrompt {
   selection: ReaderSelection;
@@ -45,15 +71,35 @@ export default function App(): React.JSX.Element {
   const [libraryView, setLibraryView] = useState(true);
   const [outlineHidden, setOutlineHidden] = useState(false);
   const [aiCollapsed, setAiCollapsed] = useState(false);
+  // The toolbar 开关 hides the whole panel (unlike 收起, which leaves the rail).
+  const [aiHidden, setAiHidden] = useState(false);
   // Docked AI panel width in px. Dragging updates it live; only the pointer-up
   // (or keyboard/double-click) writes it through app settings.
   const [aiWidth, setAiWidth] = useState(AI_PANEL_DEFAULT_WIDTH);
   const [resizing, setResizing] = useState(false);
+  // The free-floating layout is a per-window workspace preference. It is
+  // mirrored in localStorage so it restores before app settings finish loading.
+  const [aiLayout, setAiLayout] = useState<AiPanelLayout>(readAiPanelLayout);
+  const [floatBounds, setFloatBounds] = useState<AiPanelFloatingBounds>(() =>
+    readAiFloatingBounds(window.innerWidth, window.innerHeight),
+  );
   // Pointer origin and id of the active separator drag; null when not dragging.
   const resizeStartRef = useRef<{
     pointerId: number;
     startX: number;
     startWidth: number;
+  } | null>(null);
+  const floatDragStartRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startBounds: AiPanelFloatingBounds;
+  } | null>(null);
+  const floatResizeStartRef = useRef<{
+    pointerId: number;
+    startX: number;
+    startY: number;
+    startBounds: AiPanelFloatingBounds;
   } | null>(null);
   // Focus mode hides the top bar, library chrome and outline, and asks the
   // main process for a real full-screen window.
@@ -65,6 +111,10 @@ export default function App(): React.JSX.Element {
   const [pendingImage, setPendingImage] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [settingsTab, setSettingsTab] = useState<SettingsTab>('ai');
+  // Startup is gated on a lightweight SQLite check so the library cannot flash
+  // before a first-run wizard appears.
+  const [onboardingState, setOnboardingState] =
+    useState<OnboardingGate>('checking');
   // Click-time navigation failures stay visible in the top bar until dismissed,
   // unlike the dropdown error which disappears with the query.
   const [clickError, setClickError] = useState<string | null>(null);
@@ -72,11 +122,19 @@ export default function App(): React.JSX.Element {
   // Monotonic sequence for result clicks; every continuation after an await
   // verifies it so a slower older click can never win over a newer one.
   const locateSeqRef = useRef(0);
+  const theme = useAppSettingsStore((state) => state.settings?.theme ?? null);
+  const paperTexture = useAppSettingsStore(
+    (state) => state.settings?.paperTexture ?? null,
+  );
   const papers = useLibraryStore((state) => state.papers);
   const generatingNote = useNotesStore((state) => state.generating);
   const searchQuery = useSearchStore((state) => state.query);
   const setSearchQuery = useSearchStore((state) => state.setQuery);
   const clearSearch = useSearchStore((state) => state.clear);
+  const readerPaperId = useReaderStore((state) => state.paperId);
+  const readerVersion = useReaderStore((state) => state.version);
+  const loadStickyNotes = useStickyNotesStore((state) => state.load);
+  const resetStickyNotes = useStickyNotesStore((state) => state.reset);
 
   // Keep the open reader's snapshot in sync with library changes (a newly
   // bound translation, relocation metadata, edited title, refreshed outline).
@@ -102,10 +160,59 @@ export default function App(): React.JSX.Element {
 
   const openedPaperId = openedPaper === null ? null : openedPaper.id;
 
+  // Sticky notes are scoped to the open paper and its current PDF version.
+  // Discard them when leaving the reader so another paper never inherits the
+  // previous paper's highlights; reload whenever the version changes.
+  useEffect(() => {
+    if (libraryView || openedPaperId === null || readerPaperId !== openedPaperId) {
+      resetStickyNotes();
+      return;
+    }
+    void loadStickyNotes(openedPaperId, readerVersion);
+  }, [
+    libraryView,
+    openedPaperId,
+    readerPaperId,
+    readerVersion,
+    loadStickyNotes,
+    resetStickyNotes,
+  ]);
+
   // Load AI settings once so vision availability is known before the settings
   // dialog is ever opened. The store records its own load errors.
   useEffect(() => {
     void useSettingsStore.getState().load();
+  }, []);
+
+  // Keep the document theme in sync with the persisted setting. The starting
+  // value already came from localStorage in main.tsx.
+  useEffect(() => {
+    if (theme !== null) {
+      applyTheme(theme);
+    }
+  }, [theme]);
+
+  // Grain strength is independent of the theme; the 纸感 CSS rules read it.
+  useEffect(() => {
+    if (paperTexture !== null) {
+      applyPaperTexture(paperTexture);
+    }
+  }, [paperTexture]);
+
+  // First-run check runs alongside the full settings load. The IPC only reads
+  // SQLite, so a slow BabelDOC probe cannot delay or flash the library.
+  useEffect(() => {
+    let cancelled = false;
+    void resolveOnboardingVisibility(() =>
+      window.api.appSettings.getOnboarding(),
+    ).then((state) => {
+      if (!cancelled) {
+        setOnboardingState(state);
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   // Restore the persisted AI panel width once. Clamp it against the current
@@ -129,6 +236,9 @@ export default function App(): React.JSX.Element {
   useEffect(() => {
     const handleResize = (): void => {
       setAiWidth((width) => clampAiPanelWidth(width, window.innerWidth));
+      setFloatBounds((bounds) =>
+        clampAiFloatingBounds(bounds, window.innerWidth, window.innerHeight),
+      );
     };
     window.addEventListener('resize', handleResize);
     return () => window.removeEventListener('resize', handleResize);
@@ -157,6 +267,9 @@ export default function App(): React.JSX.Element {
   // Ctrl+K focuses the global search from anywhere in the window.
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (onboardingState === 'open') {
+        return;
+      }
       if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         searchInputRef.current?.focus();
@@ -165,7 +278,7 @@ export default function App(): React.JSX.Element {
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [onboardingState]);
 
   // Search hits for chat messages/notes are located only after the paper is
   // open, so panels mounted by the open can no longer overwrite the target.
@@ -213,9 +326,12 @@ export default function App(): React.JSX.Element {
   };
 
   const enterFocusMode = (): void => {
-    // Collapse the AI panel to its rail so the page gets the full width; the
-    // rail stays available when the reader wants to ask a question.
-    setAiCollapsed(true);
+    // A docked panel collapses to its rail so the page gets the full width.
+    // A floating panel already overlays the page, so leave it as the reader
+    // arranged it.
+    if (aiLayout === 'docked') {
+      setAiCollapsed(true);
+    }
     setFocusMode(true);
     void window.api.window.setFullscreen(true).catch(() => {
       // Keep the distraction-free CSS layout when native fullscreen is unavailable.
@@ -315,23 +431,30 @@ export default function App(): React.JSX.Element {
     setResizing(false);
   };
 
-  // The separator disappears when the panel collapses or focus mode starts;
-  // never leave an abandoned drag behind for the next mount.
+  // A collapsed panel or a layout switch removes the active drag surface; never
+  // leave an abandoned gesture behind for the next mount. Focus mode keeps the
+  // separator because the panel can be expanded there too.
   useEffect(() => {
-    if (aiCollapsed || focusMode) {
-      resizeStartRef.current = null;
-      setResizing(false);
-    }
-  }, [aiCollapsed, focusMode]);
+    resizeStartRef.current = null;
+    floatDragStartRef.current = null;
+    floatResizeStartRef.current = null;
+    setResizing(false);
+  }, [aiCollapsed, aiLayout]);
 
   // Losing window focus ends the gesture without a pointerup; clear it so a
-  // later hover cannot resize the panel.
+  // later hover cannot resize or move the panel.
   useEffect(() => {
     const handleWindowBlur = (): void => {
-      if (resizeStartRef.current === null) {
+      if (
+        resizeStartRef.current === null &&
+        floatDragStartRef.current === null &&
+        floatResizeStartRef.current === null
+      ) {
         return;
       }
       resizeStartRef.current = null;
+      floatDragStartRef.current = null;
+      floatResizeStartRef.current = null;
       setResizing(false);
     };
     window.addEventListener('blur', handleWindowBlur);
@@ -355,6 +478,217 @@ export default function App(): React.JSX.Element {
     event.preventDefault();
     setAiWidth(width);
     persistAiWidth(width);
+  };
+
+  /** Open the panel from any reveal path (toolbar, 问 AI, notes, locate). */
+  const revealAiPanel = (): void => {
+    setAiHidden(false);
+    setAiCollapsed(false);
+  };
+
+  const toggleAiPanel = (): void => {
+    if (aiHidden) {
+      revealAiPanel();
+    } else {
+      setAiHidden(true);
+    }
+  };
+
+  const toggleAiLayout = (): void => {
+    const next: AiPanelLayout = aiLayout === 'docked' ? 'floating' : 'docked';
+    if (next === 'floating') {
+      const bounds = clampAiFloatingBounds(
+        floatBounds,
+        window.innerWidth,
+        window.innerHeight,
+      );
+      setFloatBounds(bounds);
+      writeAiFloatingBounds(bounds);
+    } else {
+      setAiWidth(clampAiPanelWidth(floatBounds.width, window.innerWidth));
+    }
+    setAiCollapsed(false);
+    setAiLayout(next);
+    writeAiPanelLayout(next);
+  };
+
+  const persistFloatBounds = (bounds: AiPanelFloatingBounds): void => {
+    setFloatBounds(bounds);
+    writeAiFloatingBounds(bounds);
+  };
+
+  const handleFloatDragPointerDown = (
+    event: React.PointerEvent<HTMLDivElement>,
+  ): void => {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    floatDragStartRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startBounds: floatBounds,
+    };
+    setResizing(true);
+  };
+
+  const handleFloatDragPointerMove = (
+    event: React.PointerEvent<HTMLDivElement>,
+  ): void => {
+    const start = floatDragStartRef.current;
+    if (
+      start === null ||
+      start.pointerId !== event.pointerId ||
+      !event.currentTarget.hasPointerCapture(event.pointerId) ||
+      (event.buttons & 1) === 0
+    ) {
+      return;
+    }
+    setFloatBounds(
+      moveAiFloatingBounds(
+        start.startBounds,
+        event.clientX - start.startX,
+        event.clientY - start.startY,
+        window.innerWidth,
+        window.innerHeight,
+      ),
+    );
+  };
+
+  const handleFloatDragPointerUp = (
+    event: React.PointerEvent<HTMLDivElement>,
+  ): void => {
+    const start = floatDragStartRef.current;
+    if (start === null || start.pointerId !== event.pointerId) {
+      return;
+    }
+    floatDragStartRef.current = null;
+    setResizing(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    persistFloatBounds(
+      moveAiFloatingBounds(
+        start.startBounds,
+        event.clientX - start.startX,
+        event.clientY - start.startY,
+        window.innerWidth,
+        window.innerHeight,
+      ),
+    );
+  };
+
+  const cancelFloatDrag = (event: React.PointerEvent<HTMLDivElement>): void => {
+    if (floatDragStartRef.current === null) {
+      return;
+    }
+    floatDragStartRef.current = null;
+    setResizing(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const handleFloatResizePointerDown = (
+    event: React.PointerEvent<HTMLButtonElement>,
+  ): void => {
+    if (event.button !== 0) {
+      return;
+    }
+    event.preventDefault();
+    event.currentTarget.setPointerCapture(event.pointerId);
+    floatResizeStartRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      startBounds: floatBounds,
+    };
+    setResizing(true);
+  };
+
+  const handleFloatResizePointerMove = (
+    event: React.PointerEvent<HTMLButtonElement>,
+  ): void => {
+    const start = floatResizeStartRef.current;
+    if (
+      start === null ||
+      start.pointerId !== event.pointerId ||
+      !event.currentTarget.hasPointerCapture(event.pointerId) ||
+      (event.buttons & 1) === 0
+    ) {
+      return;
+    }
+    setFloatBounds(
+      resizeAiFloatingBounds(
+        start.startBounds,
+        event.clientX - start.startX,
+        event.clientY - start.startY,
+        window.innerWidth,
+        window.innerHeight,
+      ),
+    );
+  };
+
+  const handleFloatResizePointerUp = (
+    event: React.PointerEvent<HTMLButtonElement>,
+  ): void => {
+    const start = floatResizeStartRef.current;
+    if (start === null || start.pointerId !== event.pointerId) {
+      return;
+    }
+    floatResizeStartRef.current = null;
+    setResizing(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+    persistFloatBounds(
+      resizeAiFloatingBounds(
+        start.startBounds,
+        event.clientX - start.startX,
+        event.clientY - start.startY,
+        window.innerWidth,
+        window.innerHeight,
+      ),
+    );
+  };
+
+  const cancelFloatResize = (event: React.PointerEvent<HTMLButtonElement>): void => {
+    if (floatResizeStartRef.current === null) {
+      return;
+    }
+    floatResizeStartRef.current = null;
+    setResizing(false);
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    }
+  };
+
+  const handleFloatResizeKeyDown = (
+    event: React.KeyboardEvent<HTMLButtonElement>,
+  ): void => {
+    if (event.key === 'Home') {
+      event.preventDefault();
+      persistFloatBounds(defaultAiFloatingBounds(window.innerWidth, window.innerHeight));
+      return;
+    }
+    let next = floatBounds;
+    if (event.key === 'ArrowLeft') {
+      next = { ...next, width: next.width - 20 };
+    } else if (event.key === 'ArrowRight') {
+      next = { ...next, width: next.width + 20 };
+    } else if (event.key === 'ArrowUp') {
+      next = { ...next, height: next.height - 20 };
+    } else if (event.key === 'ArrowDown') {
+      next = { ...next, height: next.height + 20 };
+    } else {
+      return;
+    }
+    event.preventDefault();
+    persistFloatBounds(
+      clampAiFloatingBounds(next, window.innerWidth, window.innerHeight),
+    );
   };
 
   const handleOpenPaper = (paper: Paper): void => {
@@ -388,6 +722,9 @@ export default function App(): React.JSX.Element {
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent): void => {
+      if (onboardingState === 'open') {
+        return;
+      }
       if (event.key === 'F11' && openedPaper !== null) {
         event.preventDefault();
         toggleFocusMode();
@@ -469,7 +806,7 @@ export default function App(): React.JSX.Element {
       setLibraryView(false);
 
       if (locate !== null) {
-        setAiCollapsed(false);
+        revealAiPanel();
         setAiTab(locate.kind === 'message' ? 'chat' : 'notes');
         setPendingLocate(locate);
       } else {
@@ -509,7 +846,7 @@ export default function App(): React.JSX.Element {
   // 判断深度: ask for a concept name inline, then generate a concept card and
   // open it in the notes tab.
   const handleJudgeDepth = (selection: ReaderSelection): void => {
-    setAiCollapsed(false);
+    revealAiPanel();
     setAiTab('notes');
     setConceptPrompt({
       selection,
@@ -522,7 +859,7 @@ export default function App(): React.JSX.Element {
     if (openedPaper === null) {
       return;
     }
-    setAiCollapsed(false);
+    revealAiPanel();
     setAiTab('notes');
     const title = selection.text.trim().slice(0, 20) || '手动笔记';
     void useNotesStore.getState().create({
@@ -540,7 +877,7 @@ export default function App(): React.JSX.Element {
     if (openedPaper === null) {
       return;
     }
-    setAiCollapsed(false);
+    revealAiPanel();
     setAiTab('notes');
     void useNotesStore
       .getState()
@@ -550,32 +887,106 @@ export default function App(): React.JSX.Element {
       });
   };
 
+  // Reveal an AI answer's sticky note: switch to its tab, make sure the reader
+  // is on the note's PDF version, then jump to its page and open the popup.
+  const handleOpenSticky = (note: StickyNote): void => {
+    revealAiPanel();
+    setAiTab('sticky');
+    void (async () => {
+      const reader = useReaderStore.getState();
+      if (reader.paperId !== note.paperId) {
+        return;
+      }
+      if (reader.version !== note.pdfVersion) {
+        await reader.setVersion(note.pdfVersion);
+        if (useReaderStore.getState().version !== note.pdfVersion) {
+          return;
+        }
+      }
+      await useStickyNotesStore.getState().load(note.paperId, note.pdfVersion);
+      if (useStickyNotesStore.getState().version !== note.pdfVersion) {
+        return;
+      }
+      if (useReaderStore.getState().paperId !== note.paperId) {
+        return;
+      }
+      useReaderStore.getState().jumpToPage(note.pageNo);
+      useStickyNotesStore.getState().openNote(note.id);
+    })();
+  };
+
   // 选框提问: keep the cropped image in the composer, then focus the chat tab.
   const handleCaptureAsk = (imageDataUrl: string): void => {
     setPendingImage(imageDataUrl);
-    setAiCollapsed(false);
+    revealAiPanel();
     setAiTab('chat');
     useChatStore.getState().requestFocus();
   };
 
   const showLibrary = libraryView || openedPaper === null;
 
+  const aiPanelClass = [
+    'ai-panel',
+    aiLayout === 'floating' ? 'floating' : '',
+    aiCollapsed ? 'collapsed' : '',
+    resizing ? 'resizing' : '',
+  ]
+    .filter((value) => value !== '')
+    .join(' ');
+
+  const aiPanelStyle: React.CSSProperties | undefined =
+    aiLayout === 'floating'
+      ? {
+          left: floatBounds.x,
+          top: floatBounds.y,
+          width: aiCollapsed ? AI_FLOATING_COLLAPSED_WIDTH : floatBounds.width,
+          height: aiCollapsed ? AI_FLOATING_COLLAPSED_HEIGHT : floatBounds.height,
+        }
+      : aiCollapsed
+        ? undefined
+        : { width: aiWidth, flexBasis: aiWidth };
+
   const openEngineSettings = (): void => {
     setSettingsTab('engine');
     setSettingsOpen(true);
   };
 
+  const finishOnboarding = (): void => {
+    setOnboardingState('closed');
+    void useAppSettingsStore
+      .getState()
+      .save({ onboarded: true })
+      .catch(() => {
+        // A settings write failure must not block first use; the store keeps
+        // the error and the wizard can simply appear again next launch.
+      });
+  };
+
+  const openOnboardingSettings = (tab: 'ai' | 'engine'): void => {
+    finishOnboarding();
+    setSettingsTab(tab);
+    setSettingsOpen(true);
+  };
+
+  const replayOnboarding = (): void => {
+    setSettingsOpen(false);
+    setOnboardingState('open');
+  };
+
+  if (onboardingState === 'checking') {
+    return (
+      <div className="app-boot" aria-hidden="true">
+        <span className="app-boot-brand">MurphyEReader</span>
+      </div>
+    );
+  }
+
   return (
     <div className={focusMode && !showLibrary ? 'app-frame reader-focus' : 'app-frame'}>
       <header className="app-topbar">
-        <button
-          type="button"
-          className="app-brand"
-          title="返回文献库"
-          onClick={handleShowLibrary}
-        >
-          PaperLens
-        </button>
+        {/* Static product mark. Navigation back to the library is the
+            explicitly labelled button in the reader context. */}
+        <span className="app-brand">MurphyEReader</span>
         {!showLibrary && openedPaper !== null && (
           <div className="topbar-reader-context">
             <button type="button" className="topbar-back" onClick={handleShowLibrary}>
@@ -622,16 +1033,20 @@ export default function App(): React.JSX.Element {
             </button>
           </div>
         )}
-        <button
-          type="button"
-          className="topbar-settings"
-          onClick={() => {
-            setSettingsTab('ai');
-            setSettingsOpen(true);
-          }}
-        >
-          设置
-        </button>
+        <div className="topbar-actions">
+          <TranslationStatusButton />
+          <ThemeSwitcher />
+          <button
+            type="button"
+            className="topbar-settings"
+            onClick={() => {
+              setSettingsTab('ai');
+              setSettingsOpen(true);
+            }}
+          >
+            设置
+          </button>
+        </div>
       </header>
 
       {showLibrary ? (
@@ -649,17 +1064,7 @@ export default function App(): React.JSX.Element {
         <div className="app-shell">
           <main className="reading-area reader-open" aria-label="阅读区">
             <div className="reader-layout">
-              {outlineHidden ? (
-                <button
-                  type="button"
-                  className="outline-rail"
-                  aria-label="显示大纲"
-                  title="显示大纲"
-                  onClick={() => setOutlineHidden(false)}
-                >
-                  大纲
-                </button>
-              ) : (
+              {!outlineHidden && (
                 <OutlinePanel
                   outline={openedPaper.outline}
                   onJump={handleOutlineJump}
@@ -670,8 +1075,12 @@ export default function App(): React.JSX.Element {
                 paper={openedPaper}
                 focusMode={focusMode}
                 onToggleFocusMode={toggleFocusMode}
+                outlineOpen={!outlineHidden}
+                onToggleOutline={() => setOutlineHidden((hidden) => !hidden)}
+                aiPanelOpen={!aiHidden}
+                onToggleAiPanel={toggleAiPanel}
                 onAskAI={() => {
-                  setAiCollapsed(false);
+                  revealAiPanel();
                   setAiTab('chat');
                   useChatStore.getState().requestFocus();
                 }}
@@ -687,14 +1096,14 @@ export default function App(): React.JSX.Element {
             </div>
           </main>
 
-          {/* Only the reader branch renders here, so expansion and focus mode
-              are the remaining conditions for a draggable separator. */}
-          {!aiCollapsed && !focusMode && (
+          {/* Only a docked, expanded panel gets the separator. A floating
+              panel resizes from its bottom-right corner instead. */}
+          {!aiHidden && !aiCollapsed && aiLayout === 'docked' && (
             <div
               className="ai-resizer"
               role="separator"
               aria-orientation="vertical"
-              aria-label="调整 AI 面板宽度"
+              aria-label="调整智慧阅读面板宽度"
               aria-valuenow={aiWidth}
               aria-valuemin={AI_PANEL_MIN_WIDTH}
               aria-valuemax={aiPanelMaxWidth(window.innerWidth)}
@@ -709,28 +1118,83 @@ export default function App(): React.JSX.Element {
             />
           )}
 
-          <aside
-            className={
-              aiCollapsed ? 'ai-panel collapsed' : resizing ? 'ai-panel resizing' : 'ai-panel'
-            }
-            style={aiCollapsed ? undefined : { width: aiWidth, flexBasis: aiWidth }}
-            aria-label="AI 面板"
-          >
+          {!aiHidden && (
+          <aside className={aiPanelClass} style={aiPanelStyle} aria-label="智慧阅读面板">
             <div className="panel-bar">
-              {!aiCollapsed && <span className="panel-heading">AI 助手</span>}
-              <button
-                type="button"
-                className="rail-toggle"
-                aria-label={aiCollapsed ? '展开 AI 面板' : '收起 AI 面板'}
-                title={aiCollapsed ? '展开 AI 面板' : '收起 AI 面板'}
-                onClick={() => setAiCollapsed((value) => !value)}
-              >
-                {aiCollapsed ? '«' : '»'}
-              </button>
+              {(!aiCollapsed || aiLayout === 'floating') && (
+                <div
+                  className={aiLayout === 'floating' ? 'ai-panel-drag' : 'ai-panel-title'}
+                  title={aiLayout === 'floating' ? '拖动移动智慧阅读面板' : undefined}
+                  onPointerDown={
+                    aiLayout === 'floating' ? handleFloatDragPointerDown : undefined
+                  }
+                  onPointerMove={
+                    aiLayout === 'floating' ? handleFloatDragPointerMove : undefined
+                  }
+                  onPointerUp={
+                    aiLayout === 'floating' ? handleFloatDragPointerUp : undefined
+                  }
+                  onPointerCancel={
+                    aiLayout === 'floating' ? cancelFloatDrag : undefined
+                  }
+                  onLostPointerCapture={
+                    aiLayout === 'floating'
+                      ? () => {
+                          floatDragStartRef.current = null;
+                          setResizing(false);
+                        }
+                      : undefined
+                  }
+                >
+                  <span className="panel-heading">智慧阅读</span>
+                  {aiLayout === 'floating' && !aiCollapsed && (
+                    <span className="ai-panel-drag-hint">拖动</span>
+                  )}
+                </div>
+              )}
+              <div className="panel-bar-actions">
+                {!aiCollapsed && (
+                  <button
+                    type="button"
+                    className="rail-toggle"
+                    aria-label={
+                      aiLayout === 'floating'
+                        ? '固定智慧阅读面板到右侧'
+                        : '释放为可拖动的悬浮智慧阅读面板'
+                    }
+                    title={
+                      aiLayout === 'floating'
+                        ? '固定到右侧'
+                        : '悬浮：拖动标题栏移动，拖右下角缩放'
+                    }
+                    onClick={toggleAiLayout}
+                  >
+                    {aiLayout === 'floating' ? '靠边' : '悬浮'}
+                  </button>
+                )}
+                <button
+                  type="button"
+                  className="rail-toggle"
+                  aria-label={aiCollapsed ? '展开智慧阅读' : '收起智慧阅读'}
+                  title={aiCollapsed ? '展开智慧阅读' : '收起智慧阅读'}
+                  onClick={() => setAiCollapsed((value) => !value)}
+                >
+                  {aiCollapsed ? '展开' : '收起'}
+                </button>
+                <button
+                  type="button"
+                  className="rail-toggle"
+                  aria-label="关闭智慧阅读"
+                  title="关闭智慧阅读；从工具栏「智慧阅读」重新打开"
+                  onClick={() => setAiHidden(true)}
+                >
+                  关闭
+                </button>
+              </div>
             </div>
             {!aiCollapsed && (
               <>
-                <div className="ai-tabs" role="tablist" aria-label="AI 面板视图">
+                <div className="ai-tabs" role="tablist" aria-label="智慧阅读视图">
                   <button
                     type="button"
                     role="tab"
@@ -749,6 +1213,15 @@ export default function App(): React.JSX.Element {
                   >
                     笔记
                   </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={aiTab === 'sticky'}
+                    className={aiTab === 'sticky' ? 'ai-tab active' : 'ai-tab'}
+                    onClick={() => setAiTab('sticky')}
+                  >
+                    标注
+                  </button>
                 </div>
 
                 {aiTab === 'chat' ? (
@@ -757,7 +1230,10 @@ export default function App(): React.JSX.Element {
                     pendingImage={pendingImage}
                     onPendingImageConsumed={() => setPendingImage(null)}
                     onOpenNote={handleOpenNote}
+                    onOpenSticky={handleOpenSticky}
                   />
+                ) : aiTab === 'sticky' ? (
+                  <StickyNotesPanel paper={openedPaper} />
                 ) : (
                   <>
                     {conceptPrompt !== null && (
@@ -806,7 +1282,25 @@ export default function App(): React.JSX.Element {
                 )}
               </>
             )}
+            {aiLayout === 'floating' && !aiCollapsed && (
+              <button
+                type="button"
+                className="ai-float-resizer"
+                aria-label="调整智慧阅读面板大小"
+                title="拖动调整大小；方向键微调，Home 复位"
+                onPointerDown={handleFloatResizePointerDown}
+                onPointerMove={handleFloatResizePointerMove}
+                onPointerUp={handleFloatResizePointerUp}
+                onPointerCancel={cancelFloatResize}
+                onLostPointerCapture={() => {
+                  floatResizeStartRef.current = null;
+                  setResizing(false);
+                }}
+                onKeyDown={handleFloatResizeKeyDown}
+              />
+            )}
           </aside>
+          )}
         </div>
       )}
 
@@ -816,6 +1310,14 @@ export default function App(): React.JSX.Element {
         <SettingsDialog
           initialTab={settingsTab}
           onClose={() => setSettingsOpen(false)}
+          onReplayOnboarding={replayOnboarding}
+        />
+      )}
+
+      {onboardingState === 'open' && (
+        <Onboarding
+          onFinish={finishOnboarding}
+          onOpenSettings={openOnboardingSettings}
         />
       )}
     </div>

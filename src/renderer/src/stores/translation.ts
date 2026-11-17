@@ -15,12 +15,18 @@ export interface TranslationState {
   logs: string[];
   /** True while the log panel is collapsed to save space. */
   collapsed: boolean;
+  /** True when the floating card was closed; the job keeps running. */
+  hidden: boolean;
   /** Paper rebound by the last successful translation. */
   donePaper: Paper | null;
   init(): () => void;
   start(paperId: number): Promise<void>;
   cancel(): Promise<void>;
   dismiss(): void;
+  /** Closes the floating card without touching the running job. */
+  hide(): void;
+  /** Reopens a card the user closed. */
+  show(): void;
   toggleLogs(): void;
 }
 
@@ -39,6 +45,7 @@ function runningJob(
     paperId,
     title,
     status: 'running',
+    startedAt: Date.now(),
     percent: null,
     line: '',
     logs,
@@ -52,8 +59,9 @@ function appendLog(
   logs: string[],
   line: string,
   percent: number | null,
+  record: boolean,
 ): { job: TranslationJobInfo; logs: string[] } {
-  const nextLogs = [...logs, line].slice(-MAX_LOG_LINES);
+  const nextLogs = record ? [...logs, line].slice(-MAX_LOG_LINES) : logs;
   return {
     logs: nextLogs,
     job: {
@@ -69,6 +77,7 @@ export const useTranslationStore = create<TranslationState>()((set, get) => ({
   job: null,
   logs: [],
   collapsed: false,
+  hidden: false,
   donePaper: null,
 
   init() {
@@ -79,7 +88,13 @@ export const useTranslationStore = create<TranslationState>()((set, get) => ({
           if (state.job === null || state.job.jobId !== event.jobId) {
             return state;
           }
-          return appendLog(state.job, state.logs, event.line, event.percent);
+          return appendLog(
+            state.job,
+            state.logs,
+            event.line,
+            event.percent,
+            event.appendLog !== false,
+          );
         });
       });
       const offDone = window.api.translation.onDone((event) => {
@@ -93,7 +108,7 @@ export const useTranslationStore = create<TranslationState>()((set, get) => ({
               ...job,
               status: 'done',
               percent: 100,
-              line: '翻译完成',
+              line: event.message ?? '翻译完成',
               error: null,
             },
             donePaper: event.paper,
@@ -172,6 +187,7 @@ export const useTranslationStore = create<TranslationState>()((set, get) => ({
         job: runningJob(result.jobId, result.paperId, result.title),
         logs: [],
         collapsed: false,
+        hidden: false,
         donePaper: null,
       });
     } catch (error) {
@@ -202,8 +218,16 @@ export const useTranslationStore = create<TranslationState>()((set, get) => ({
       if (state.job === null || state.job.status === 'running') {
         return state;
       }
-      return { job: null, logs: [], collapsed: false, donePaper: null };
+      return { job: null, logs: [], collapsed: false, hidden: false, donePaper: null };
     });
+  },
+
+  hide() {
+    set((state) => (state.job === null ? state : { hidden: true }));
+  },
+
+  show() {
+    set({ hidden: false });
   },
 
   toggleLogs() {

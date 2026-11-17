@@ -17,11 +17,17 @@ import type {
   Note,
   NoteType,
   Paper,
+  PaperFileStatus,
   PaperUpdatePatch,
   PdfExportJob,
+  PdfVersion,
   RootChangeResult,
   SearchResult,
   SelectionTranslationResult,
+  StickyNote,
+  StickyNoteCreateInput,
+  StickyNoteExportResult,
+  StickyNoteUpdatePatch,
   StorageInfo,
   ToolDoneEvent,
   ToolProgressEvent,
@@ -42,8 +48,8 @@ export interface PaperLensApi {
     attachTranslated(id: number): Promise<Paper | null>;
     update(id: number, patch: PaperUpdatePatch): Promise<Paper>;
     remove(id: number): Promise<void>;
-    markRead(id: number, version: 'original' | 'translated', pageNo: number): Promise<void>;
-    checkFiles(): Promise<{ id: number; originalExists: boolean; translatedExists: boolean }[]>;
+    markRead(id: number, version: PdfVersion, pageNo: number): Promise<void>;
+    checkFiles(): Promise<PaperFileStatus[]>;
     relocate(id: number, version: 'original' | 'translated'): Promise<Paper | null>;
   };
   folders: {
@@ -53,10 +59,20 @@ export interface PaperLensApi {
     remove(id: number): Promise<void>;
   };
   pdf: {
+    /**
+     * Loads one paper version. When an existing managed mono translation lost
+     * page content, the main process rebinds the complete dual output and
+     * reports `repaired` together with the new translated page count.
+     */
     load(
       paperId: number,
-      version: 'original' | 'translated',
-    ): Promise<{ data: ArrayBuffer; fileName: string }>;
+      version: PdfVersion,
+    ): Promise<{
+      data: ArrayBuffer;
+      fileName: string;
+      repaired?: boolean;
+      pageCountTranslated?: number;
+    }>;
   };
   conversations: {
     list(paperId: number): Promise<Conversation[]>;
@@ -118,6 +134,21 @@ export interface PaperLensApi {
       },
     ): Promise<Note | null>;
   };
+  stickyNotes: {
+    list(paperId: number, version: PdfVersion): Promise<StickyNote[]>;
+    create(input: StickyNoteCreateInput): Promise<StickyNote>;
+    update(id: number, patch: StickyNoteUpdatePatch): Promise<StickyNote>;
+    remove(id: number): Promise<void>;
+    clearPageDrawings(
+      paperId: number,
+      version: PdfVersion,
+      pageNo: number,
+    ): Promise<number>;
+    exportPdf(
+      paperId: number,
+      version: PdfVersion,
+    ): Promise<StickyNoteExportResult | null>;
+  };
   search: {
     global(query: string): Promise<SearchResult[]>;
   };
@@ -155,10 +186,14 @@ export interface PaperLensApi {
     get(): Promise<AiSettings>;
     set(input: AiSettingsInput): Promise<AiSettings>;
     test(input: AiSettingsInput): Promise<{ ok: boolean; error?: string }>;
+    /** 用系统浏览器打开 DeepSeek 的 API Key 页面。 */
+    openDeepSeekConsole(): Promise<void>;
   };
   appSettings: {
     get(): Promise<AppSettings>;
     update(patch: AppSettingsUpdate): Promise<AppSettings>;
+    /** 轻量查询，不触发 BabelDOC 探测。 */
+    getOnboarding(): Promise<{ onboarded: boolean }>;
   };
   storage: {
     getInfo(): Promise<StorageInfo>;

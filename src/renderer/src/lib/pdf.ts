@@ -69,11 +69,16 @@ export async function findInDocument(pdf: SearchablePdf, query: string): Promise
   return matches;
 }
 
+export interface SelectionInPage {
+  text: string;
+  range: Range;
+}
+
 /**
- * Returns the trimmed text of the current window selection when the whole
- * selection lives inside `pageRoot`; otherwise `null`.
+ * Returns the trimmed text and range of the current window selection when the
+ * whole selection lives inside `pageRoot`; otherwise `null`.
  */
-export function getSelectionInPage(pageRoot: HTMLElement): { text: string } | null {
+export function getSelectionInPage(pageRoot: HTMLElement): SelectionInPage | null {
   const selection = window.getSelection();
   if (selection === null || selection.isCollapsed || selection.rangeCount === 0) {
     return null;
@@ -87,5 +92,5 @@ export function getSelectionInPage(pageRoot: HTMLElement): { text: string } | nu
   if (!pageRoot.contains(range.commonAncestorContainer)) {
     return null;
   }
-  return { text };
+  return { text, range };
 }

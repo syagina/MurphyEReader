@@ -25,12 +25,21 @@ describe('openDb 初始化数据库', () => {
       .prepare("SELECT name FROM sqlite_master WHERE type = 'table'")
       .all() as { name: string }[];
     expect(tables.map((table) => table.name)).toEqual(
-      expect.arrayContaining(['papers', 'pages', 'conversations', 'messages', 'notes', 'settings', 'folders']),
+      expect.arrayContaining([
+        'papers',
+        'pages',
+        'conversations',
+        'messages',
+        'notes',
+        'settings',
+        'folders',
+        'sticky_notes',
+      ]),
     );
   });
 
   it('将 PRAGMA user_version 设为 SCHEMA_VERSION', () => {
-    expect(SCHEMA_VERSION).toBe(2);
+    expect(SCHEMA_VERSION).toBe(4);
     expect(db.pragma('user_version', { simple: true })).toBe(SCHEMA_VERSION);
   });
 

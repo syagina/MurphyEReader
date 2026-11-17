@@ -150,6 +150,19 @@ describe('runFolderImport', () => {
     expect(result.failed[0]?.message).toBe('坏 PDF');
   });
 
+  it('恢复的重复文件计入导入而不是跳过', async () => {
+    const result = await runFolderImport(
+      ['a.pdf', 'b.pdf'],
+      async (file) =>
+        file === 'a.pdf'
+          ? { paper: makePaper({ id: 1 }), duplicate: true, restored: true }
+          : { paper: makePaper({ id: 2 }), duplicate: true },
+      { isCanceled: () => false, onProgress: () => undefined },
+    );
+
+    expect(result).toMatchObject({ imported: 1, skipped: 1, failed: [] });
+  });
+
   it('取消后当前文件完成、后续文件不再开始且已导入结果保留', async () => {
     const started: string[] = [];
     let canceled = false;

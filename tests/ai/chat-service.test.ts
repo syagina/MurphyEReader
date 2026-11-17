@@ -114,7 +114,7 @@ function makeRequest(
     paperId: paper.id,
     conversationId,
     question: '这篇论文讲了什么？',
-    fullTextMode: false,
+    contextMode: 'page',
     ...overrides,
   };
 }
@@ -295,7 +295,7 @@ describe('startChat streaming', () => {
     const donePromise = sink.waitFor('chat:done');
 
     const request = makeRequest(paper, conversationId, {
-      fullTextMode: true,
+      contextMode: 'full',
       images: ['data:image/png;base64,AAAA', 'https://example.com/b.png'],
     });
     await startChat(deps, request);
@@ -539,7 +539,7 @@ describe('startChat setup errors', () => {
       paperId: 999,
       conversationId: 1,
       question: '问题',
-      fullTextMode: false,
+      contextMode: 'page',
     };
     const result = await startChat(deps, request);
     const payload = (await errorPromise) as {

@@ -94,6 +94,6 @@ describe('buildNotesDocx', () => {
     const bytes = await buildNotesDocx('正文', '   ', { renderFormula: async () => null });
     const files = readZip(bytes);
 
-    expect(files['docProps/core.xml']).toContain('PaperLens 笔记');
+    expect(files['docProps/core.xml']).toContain('MurphyEReader 笔记');
   });
 });

@@ -154,7 +154,12 @@ describe('useReaderStore.setVersion', () => {
     // only the same-count sync rule can produce the expected page.
     useReaderStore.getState().setCurrentPage(5);
     useReaderStore.getState().setZoom(1.5);
-    useReaderStore.getState().setSelection({ text: '一段话', pageNo: 5 });
+    useReaderStore.getState().setSelection({
+      text: '一段话',
+      pageNo: 5,
+      version: 'original',
+      rects: [{ x: 0.1, y: 0.2, width: 0.3, height: 0.04 }],
+    });
 
     await useReaderStore.getState().setVersion('translated');
 

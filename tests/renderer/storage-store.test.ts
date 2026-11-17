@@ -43,6 +43,12 @@ function makeAppSettings(overrides: Partial<AppSettings> = {}): AppSettings {
     babeldocPath: '',
     babeldocDetectedPath: null,
     aiPanelWidth: 360,
+    theme: 'light',
+    paperTexture: 45,
+    translationQps: 8,
+    translationWorkers: 8,
+    translationAutoGlossary: true,
+    onboarded: false,
     ...overrides,
   };
 }

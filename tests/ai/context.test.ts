@@ -8,7 +8,7 @@ import {
   retrieveRelevantPages,
   selectRelatedNotes,
 } from '@main/ai/context';
-import { ASK_SYSTEM_PROMPT } from '@main/ai/prompts';
+import { ASK_SYSTEM_PROMPT, CONVERSATION_SYSTEM_PROMPT } from '@main/ai/prompts';
 
 function makePaper(overrides: Partial<Paper> = {}): Paper {
   return {
@@ -123,6 +123,8 @@ describe('buildPaperContextBlock', () => {
 });
 
 describe('assembleChatContext 全文模式', () => {
+  // Existing full-context behavior: all pages when they fit, relevant pages
+  // plus the current page when the budget is tight.
   const question = '请总结全文';
   const pageTexts = ['中'.repeat(10), '中'.repeat(10), '中'.repeat(10)];
 
@@ -132,7 +134,7 @@ describe('assembleChatContext 全文模式', () => {
       pages: makePages(pageTexts),
       history: [],
       question,
-      fullTextMode: true,
+      contextMode: 'full',
       budgetTokens: 10_000,
     });
 
@@ -163,7 +165,7 @@ describe('assembleChatContext 全文模式', () => {
       question,
       selectionText,
       currentPageNo,
-      fullTextMode: true,
+      contextMode: 'full',
       budgetTokens,
     });
 
@@ -190,7 +192,7 @@ describe('assembleChatContext 全文模式', () => {
       pages,
       history,
       question,
-      fullTextMode: true,
+      contextMode: 'full',
       budgetTokens: estimateTokens(fullSystem) + estimateTokens(question),
     });
 
@@ -211,7 +213,7 @@ describe('assembleChatContext 非全文模式', () => {
       history: [],
       question: '这是什么',
       currentPageNo: 2,
-      fullTextMode: false,
+      contextMode: 'page',
       budgetTokens: 1,
     });
 
@@ -225,13 +227,67 @@ describe('assembleChatContext 非全文模式', () => {
       pages,
       history: [],
       question: '这是什么',
-      fullTextMode: false,
+      contextMode: 'page',
       budgetTokens: 1,
     });
 
     expect(fallback.includedPageNos).toEqual([1]);
     expect(fallback.system).toContain('[第 1 页]\n第一页');
     expect(fallback.trimmed).toBe(false);
+  });
+});
+
+describe('assembleChatContext 纯聊天模式', () => {
+  it('不附带元信息、目录或正文，只发送对话历史与当前问题', () => {
+    const paper = makePaper();
+    const pages = makePages(['第一页正文', '第二页正文']);
+    const history = [makeMessage(1, 'user', '上一个问题'), makeMessage(2, 'assistant', '上一个回答')];
+
+    const result = assembleChatContext({
+      paper,
+      pages,
+      history,
+      question: '解释一下 Transformer',
+      currentPageNo: 2,
+      contextMode: 'conversation',
+      budgetTokens: 10_000,
+    });
+
+    expect(result.system).toBe(CONVERSATION_SYSTEM_PROMPT);
+    expect(result.system).not.toContain(paper.title);
+    expect(result.system).not.toContain('【目录】');
+    expect(result.system).not.toContain('第一页正文');
+    expect(result.includedPageNos).toEqual([]);
+    expect(result.trimmed).toBe(false);
+    expect(result.messages).toEqual([
+      { role: 'user', content: '上一个问题' },
+      { role: 'assistant', content: '上一个回答' },
+      { role: 'user', content: '解释一下 Transformer' },
+    ]);
+  });
+
+  it('选文是用户显式附件，仍会附带原文并标注页码，但不带其他论文内容', () => {
+    const paper = makePaper();
+    const pages = makePages(['第一页正文', '第二页正文']);
+
+    const result = assembleChatContext({
+      paper,
+      pages,
+      history: [],
+      question: '这句话是什么意思',
+      selectionText: '这是选中的句子',
+      currentPageNo: 2,
+      contextMode: 'conversation',
+      budgetTokens: 10_000,
+    });
+
+    expect(result.system).toContain(CONVERSATION_SYSTEM_PROMPT);
+    expect(result.system).toContain('【用户选中的原文（第 2 页）】');
+    expect(result.system).toContain('这是选中的句子');
+    expect(result.system).not.toContain(paper.title);
+    expect(result.system).not.toContain('【目录】');
+    expect(result.system).not.toContain('第一页正文');
+    expect(result.includedPageNos).toEqual([]);
   });
 });
 
@@ -258,7 +314,7 @@ describe('assembleChatContext 历史裁剪', () => {
       history,
       question,
       currentPageNo: 1,
-      fullTextMode: false,
+      contextMode: 'page',
       budgetTokens,
     });
 

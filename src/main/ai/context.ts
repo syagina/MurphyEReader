@@ -1,6 +1,13 @@
-import type { ChatMessage, Note, OutlineNode, Paper, PaperPage } from '@shared/types';
+import type {
+  ChatContextMode,
+  ChatMessage,
+  Note,
+  OutlineNode,
+  Paper,
+  PaperPage,
+} from '@shared/types';
 import type { AiMessage } from './client';
-import { ASK_SYSTEM_PROMPT } from './prompts';
+import { ASK_SYSTEM_PROMPT, CONVERSATION_SYSTEM_PROMPT } from './prompts';
 
 export interface AssembleInput {
   paper: Paper;
@@ -9,7 +16,7 @@ export interface AssembleInput {
   question: string;
   selectionText?: string;
   currentPageNo?: number;
-  fullTextMode: boolean;
+  contextMode: ChatContextMode;
   budgetTokens: number;
 }
 
@@ -174,6 +181,23 @@ function composeSystem(
   )}`;
 }
 
+/**
+ * Conversation-only mode deliberately omits metadata, the outline and page
+ * text. A selection is still sent because it is an explicit user attachment,
+ * not automatically retrieved paper context.
+ */
+function composeConversationSystem(
+  selectionText: string | undefined,
+  currentPageNo: number | undefined,
+): string {
+  if (selectionText === undefined || selectionText === '') {
+    return CONVERSATION_SYSTEM_PROMPT;
+  }
+  const pageLabel =
+    currentPageNo === undefined ? '' : `（第 ${currentPageNo} 页）`;
+  return `${CONVERSATION_SYSTEM_PROMPT}\n\n【用户选中的原文${pageLabel}】\n${selectionText}`;
+}
+
 function buildMessages(
   history: ChatMessage[],
   question: string,
@@ -200,11 +224,25 @@ function buildMessages(
 }
 
 export function assembleChatContext(input: AssembleInput): AssembleOutput {
-  const { paper, pages, history, question, selectionText, fullTextMode, budgetTokens } = input;
+  const { paper, pages, history, question, selectionText, contextMode, budgetTokens } = input;
   const sortedPages = [...pages].sort((a, b) => a.pageNo - b.pageNo);
   const questionTokens = estimateTokens(question);
 
-  if (!fullTextMode) {
+  if (contextMode === 'conversation') {
+    const system = composeConversationSystem(selectionText, input.currentPageNo);
+    return {
+      system,
+      messages: buildMessages(
+        history,
+        question,
+        budgetTokens - estimateTokens(system) - questionTokens,
+      ),
+      includedPageNos: [],
+      trimmed: false,
+    };
+  }
+
+  if (contextMode === 'page') {
     const currentPageNo = input.currentPageNo ?? 1;
     const currentPage = sortedPages.find((page) => page.pageNo === currentPageNo);
     const includedPages = currentPage === undefined ? [] : [currentPage];

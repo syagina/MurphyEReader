@@ -187,7 +187,7 @@ function normalizeMarkdown(value: string): string {
 }
 
 /**
- * Converts a DOM range to the Markdown subset PaperLens understands. KaTeX
+ * Converts a DOM range to the Markdown subset MurphyEReader understands. KaTeX
  * nodes contribute their original TeX (`aria-label` or MathML annotation)
  * instead of the rendered glyph soup, so formulas survive the trip into notes
  * and exported documents.

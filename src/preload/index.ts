@@ -75,6 +75,16 @@ const api: PaperLensApi = {
     remove: (id) => ipcRenderer.invoke('notes:remove', id),
     generate: (kind, params) => ipcRenderer.invoke('notes:generate', kind, params),
   },
+  stickyNotes: {
+    list: (paperId, version) => ipcRenderer.invoke('stickyNotes:list', paperId, version),
+    create: (input) => ipcRenderer.invoke('stickyNotes:create', input),
+    update: (id, patch) => ipcRenderer.invoke('stickyNotes:update', id, patch),
+    remove: (id) => ipcRenderer.invoke('stickyNotes:remove', id),
+    clearPageDrawings: (paperId, version, pageNo) =>
+      ipcRenderer.invoke('stickyNotes:clearPageDrawings', paperId, version, pageNo),
+    exportPdf: (paperId, version) =>
+      ipcRenderer.invoke('stickyNotes:exportPdf', paperId, version),
+  },
   search: {
     global: (query) => ipcRenderer.invoke('search:global', query),
   },
@@ -97,10 +107,13 @@ const api: PaperLensApi = {
     get: () => ipcRenderer.invoke('settings:get'),
     set: (input) => ipcRenderer.invoke('settings:set', input),
     test: (input) => ipcRenderer.invoke('settings:test', input),
+    openDeepSeekConsole: () =>
+      ipcRenderer.invoke('settings:openDeepSeekConsole'),
   },
   appSettings: {
     get: () => ipcRenderer.invoke('appSettings:get'),
     update: (patch) => ipcRenderer.invoke('appSettings:update', patch),
+    getOnboarding: () => ipcRenderer.invoke('appSettings:getOnboarding'),
   },
   storage: {
     getInfo: () => ipcRenderer.invoke('storage:getInfo'),

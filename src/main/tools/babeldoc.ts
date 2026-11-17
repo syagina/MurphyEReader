@@ -1,4 +1,5 @@
 import type { CommandInvocation } from '@shared/types';
+import { MANAGED_ENGINE_FOLDER } from './babeldoc-installer';
 
 /** Environment probing seams so detection order is testable without spawning. */
 export interface CandidateOptions {
@@ -91,6 +92,14 @@ export function babeldocCandidates(options: BabeldocCandidateOptions): string[] 
       candidates,
       environmentPath(options.env, 'APPDATA', 'Python\\Scripts\\babeldoc.exe'),
     );
+    addCandidate(
+      candidates,
+      environmentPath(
+        options.env,
+        'LOCALAPPDATA',
+        `${MANAGED_ENGINE_FOLDER}\\bin\\babeldoc.exe`,
+      ),
+    );
   }
   return candidates.filter((candidate) => options.exists(candidate));
 }
@@ -107,6 +116,14 @@ export function uvCandidates(options: CandidateOptions): string[] {
       environmentPath(options.env, 'USERPROFILE', '.local\\bin\\uv.exe'),
     );
     addCandidate(candidates, environmentPath(options.env, 'LOCALAPPDATA', 'uv\\uv.exe'));
+    addCandidate(
+      candidates,
+      environmentPath(
+        options.env,
+        'LOCALAPPDATA',
+        `${MANAGED_ENGINE_FOLDER}\\uv\\uv.exe`,
+      ),
+    );
   }
   return candidates.filter((candidate) => options.exists(candidate));
 }

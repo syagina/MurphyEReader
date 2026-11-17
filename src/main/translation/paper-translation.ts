@@ -15,6 +15,7 @@ import { basename, join } from 'node:path';
 import type Database from 'better-sqlite3';
 import type {
   Paper,
+  PageText,
   ToolRunOptions,
   ToolRunResult,
   TranslationCanceledEvent,
@@ -30,24 +31,50 @@ import {
   TRANSLATION_NOT_CONFIGURED,
   TRANSLATION_ORIGINAL_MISSING,
   TRANSLATION_OUTPUT_AMBIGUOUS,
+  TRANSLATION_OUTPUT_INCOMPLETE,
   TRANSLATION_OUTPUT_INVALID,
   TRANSLATION_OUTPUT_MISSING,
+  TRANSLATION_PAPER_EMPTY_RESULT,
+  formatTranslationElapsed,
+  normalizeTranslationQps,
+  normalizeTranslationWorkers,
   translationCjkRatio,
+  translationStage,
+  translationStageText,
+  type TranslationStage,
 } from '@shared/translation';
 import type { AiConfig } from '../ai/client';
 import { getPages } from '../db/pages';
 import { getPaper, updatePaper } from '../db/papers';
 import type { JobRegistry } from '../jobs/job-registry';
-import { getPdfPageCount } from '../pdf/extract';
+import { extractPdf, getPdfPageCount } from '../pdf/extract';
 import type { PaperLibrary } from '../storage/library-service';
 import { BABELDOC_DUAL_NAME, BABELDOC_MONO_NAME, storageFile } from '../storage/paths';
 import { buildCommandInvocation } from '../tools/babeldoc';
+import { findIncompletePages } from './completeness';
+import {
+  startOpenAiProxy,
+  type OpenAiProxyHandle,
+  type ProxyActivity,
+} from './openai-proxy';
+import { buildTranslationArgs } from './translation-args';
 
 const MONO_SUFFIX = '.mono.pdf';
 const DUAL_SUFFIX = '.dual.pdf';
 const CHINESE_DETECTION_CHARS = 5000;
 const MAX_LOG_LINES = 20;
 const SHUTDOWN_TIMEOUT_MS = 5000;
+/**
+ * BabelDOC's rich progress stays silent in a pipe for long stretches while it
+ * waits on the AI provider. A heartbeat keeps the card moving even then.
+ */
+const HEARTBEAT_INTERVAL_MS = 3000;
+/**
+ * BabelDOC's Rich progress is invisible in a pipe, so the card's log panel
+ * would otherwise stay empty until the process exits. While the engine is
+ * silent, append the heartbeat line to the log at this slower cadence.
+ */
+const HEARTBEAT_LOG_INTERVAL_MS = 10_000;
 const INVALID_MANAGED_PATH_MESSAGE = '文献文件夹路径异常，请重新定位或导入';
 const BINDING_FAILED_MESSAGE = '绑定译本失败，请查看日志';
 const BINDING_FAILED_DETAIL_PREFIX = '绑定译本失败：';
@@ -58,12 +85,21 @@ const RATE_LIMIT_MESSAGE = 'AI 接口请求过于频繁或额度不足，请稍�
 const NETWORK_FAILURE_MESSAGE = '网络连接失败，请检查网络后重试';
 const MODEL_FAILURE_MESSAGE = 'AI 模型不可用，请检查模型配置';
 const ENCRYPTED_PDF_MESSAGE = '该 PDF 已加密，无法翻译';
+const TRANSLATION_DONE = '翻译完成';
+const TRANSLATION_DONE_DUAL = '翻译完成（已改用双语对照版，避免内容遗漏）';
 
 /** The subset of the single tool runner whole-paper translation needs. */
 export interface PaperTranslationRunner {
   run(options: ToolRunOptions): Promise<ToolRunResult>;
   cancel(jobId: string): boolean;
   cancelAll(): void;
+}
+
+/** Engine behavior tuned from Settings and snapshotted when a job starts. */
+export interface WholePaperTranslationOptions {
+  qps: number;
+  workers: number;
+  autoExtractGlossary: boolean;
 }
 
 export interface PaperTranslationDeps {
@@ -75,6 +111,7 @@ export interface PaperTranslationDeps {
   tempRoot?: string;
   getEnginePath(): Promise<string | null>;
   getAiConfig(): AiConfig | null;
+  getTranslationOptions(): WholePaperTranslationOptions;
   emit(channel: string, payload: unknown): void;
 }
 
@@ -117,22 +154,43 @@ function tomlString(value: string): string {
   return `"${cleaned.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
 }
 
-/** The only keys whole-paper translation writes; the key stays out of argv. */
-function buildTranslationConfig(ai: AiConfig): string {
-  return [
+/**
+ * The only keys whole-paper translation writes. BabelDOC talks to the local
+ * relay instead of the provider, so the real API key never reaches the config
+ * file (or BabelDOC's logs).
+ */
+function buildTranslationConfig(
+  ai: AiConfig,
+  proxy: Pick<OpenAiProxyHandle, 'baseUrl' | 'apiKey'>,
+  options: WholePaperTranslationOptions,
+): string {
+  const lines = [
     '[babeldoc]',
     'openai = true',
     `openai-model = ${tomlString(ai.chatModel)}`,
-    `openai-base-url = ${tomlString(ai.baseUrl)}`,
-    `openai-api-key = ${tomlString(ai.apiKey)}`,
+    `openai-base-url = ${tomlString(proxy.baseUrl)}`,
+    `openai-api-key = ${tomlString(proxy.apiKey)}`,
     'lang-out = "zh-CN"',
-    'qps = 4',
-    '',
-  ].join('\n');
+    // qps is only the rate ceiling. The worker pools are written explicitly so
+    // slow provider responses can still saturate that rate without the two
+    // settings being forced to the same number.
+    `qps = ${normalizeTranslationQps(options.qps)}`,
+    `pool-max-workers = ${normalizeTranslationWorkers(options.workers)}`,
+    `term-pool-max-workers = ${normalizeTranslationWorkers(options.workers)}`,
+  ];
+  if (!options.autoExtractGlossary) {
+    // configargparse keys must match the CLI option string exactly: the
+    // positive name is not a registered option, only the `no-` form is.
+    lines.push('no-auto-extract-glossary = true');
+  }
+  lines.push('');
+  return lines.join('\n');
 }
 
 function parsePercentLine(line: string): number | null {
-  const match = /(\d{1,3})%/.exec(line);
+  // BabelDOC prints either `45%` (plain logs) or a rich-progress refresh like
+  // `45/100` followed by a bare carriage return inside a pipe.
+  const match = /(\d{1,3})\s*%/.exec(line) ?? /(?:^|\s)(\d{1,3})\s*\/\s*100(?!\d)/.exec(line);
   if (match === null) {
     return null;
   }
@@ -140,9 +198,109 @@ function parsePercentLine(line: string): number | null {
   return Number.isFinite(value) ? Math.min(100, value) : null;
 }
 
+/**
+ * Heartbeat text shown while the engine has not printed anything itself. It
+ * reports what the local relay observed, which is the only visible sign of
+ * progress while BabelDOC waits on the provider.
+ */
+function retryReasonLabel(reason: ProxyActivity['lastRetryReason']): string | null {
+  switch (reason) {
+    case 'empty':
+      return 'AI 返回空内容';
+    case 'truncated':
+      return '输出被截断';
+    case 'rate-limit':
+      return '接口限流 429';
+    case 'timeout':
+      return '请求超时';
+    case 'upstream':
+      return '服务端错误';
+    case 'budget':
+      return '模型拒绝较大输出上限';
+    default:
+      return null;
+  }
+}
+
+function activityLine(activity: ProxyActivity, elapsed: string): string {
+  const parts = [`AI 已返回 ${activity.completed} 段`];
+  if (activity.inflight > 0) {
+    parts.push(`等待返回 ${activity.inflight} 段`);
+  }
+  if (activity.retries > 0) {
+    const reason = retryReasonLabel(activity.lastRetryReason);
+    parts.push(
+      reason === null
+        ? `已自动重试 ${activity.retries} 次`
+        : `已自动重试 ${activity.retries} 次（最近原因：${reason}）`,
+    );
+  }
+  if (activity.failed > 0) {
+    parts.push(`失败 ${activity.failed} 段`);
+  }
+  return `${parts.join('，')}…（已用时 ${elapsed}）`;
+}
+
+function glossaryLine(activity: ProxyActivity, elapsed: string): string {
+  const parts = ['正在提取专业术语'];
+  if (activity.glossaryCompleted > 0) {
+    parts.push(`已返回 ${activity.glossaryCompleted} 条`);
+  }
+  if (activity.glossaryInflight > 0) {
+    parts.push(`等待 ${activity.glossaryInflight} 条`);
+  }
+  return `${parts.join('，')}…（已用时 ${elapsed}）`;
+}
+
+function heartbeatLine(
+  activity: ProxyActivity | null,
+  elapsedMs: number,
+  percent: number | null,
+  stage: TranslationStage | null,
+): string {
+  const elapsed = formatTranslationElapsed(elapsedMs);
+  const started = activity !== null && activity.started > 0;
+  // Translation requests in flight are the most concrete sign of progress.
+  if (activity !== null && activity.inflight > 0) {
+    return activityLine(activity, elapsed);
+  }
+  // Glossary extraction happens before paragraph translation and is otherwise
+  // invisible, which made the old heartbeat look stuck on "parsing PDF".
+  if (
+    activity !== null &&
+    (activity.glossaryInflight > 0 ||
+      (activity.glossaryStarted > 0 && !started))
+  ) {
+    return glossaryLine(activity, elapsed);
+  }
+  // After the AI phase BabelDOC typesets for a long time; report that stage
+  // instead of repeating the last request counters.
+  if (
+    stage !== null &&
+    !(started && (stage === 'translate' || stage === 'term'))
+  ) {
+    return `${translationStageText(stage, percent)}（已用时 ${elapsed}）`;
+  }
+  if (started && activity !== null) {
+    return activityLine(activity, elapsed);
+  }
+  if (stage !== null) {
+    return `${translationStageText(stage, percent)}（已用时 ${elapsed}）`;
+  }
+  return percent === null
+    ? `正在解析 PDF 并准备翻译…（已用时 ${elapsed}）`
+    : `BabelDOC 正在处理：${percent}%…（已用时 ${elapsed}）`;
+}
+
 /** Maps common BabelDOC/provider failures to fixed Chinese messages. */
 function classifyFailure(lines: string[]): string {
   const text = lines.slice(-MAX_LOG_LINES).join('\n');
+  if (/paperlens_empty_translation/i.test(text)) {
+    return TRANSLATION_PAPER_EMPTY_RESULT;
+  }
+  if (/paperlens_upstream_unreachable/i.test(text)) {
+    return NETWORK_FAILURE_MESSAGE;
+  }
   if (/401|403|unauthorized|invalid[ _-]?api[ _-]?key|authentication|api key/i.test(text)) {
     return AUTH_FAILURE_MESSAGE;
   }
@@ -214,6 +372,17 @@ function chooseDual(files: string[], monoPath: string): string | null {
   return files.find((file) => basename(file) === expected) ?? null;
 }
 
+/** Extracted page texts, or null when pdf.js cannot read the output. */
+async function extractOutputPages(filePath: string): Promise<PageText[] | null> {
+  try {
+    return (await extractPdf(filePath)).pages;
+  } catch {
+    // Completeness checking is a safety net, not a second validation gate:
+    // an unreadable text layer keeps the previous mono-binding behavior.
+    return null;
+  }
+}
+
 /** Validates the `%PDF` magic and a positive page count. */
 async function validatePdfOutput(filePath: string): Promise<number> {
   let header: Buffer;
@@ -279,6 +448,9 @@ export class PaperTranslationService {
     ) {
       throw new Error(TRANSLATION_NOT_CONFIGURED);
     }
+    // Snapshot the performance settings so changing them mid-job cannot affect
+    // a translation that is already running.
+    const options = this.deps.getTranslationOptions();
 
     if (!existsSync(paper.filePathOriginal)) {
       throw new Error(TRANSLATION_ORIGINAL_MISSING);
@@ -305,6 +477,7 @@ export class PaperTranslationService {
       paperId: managed.id,
       title: managed.title,
       status: 'running',
+      startedAt: Date.now(),
       percent: null,
       line: '',
       logs: [],
@@ -317,7 +490,7 @@ export class PaperTranslationService {
       cancelRequested: false,
     };
     this.active = active;
-    active.job = this.runJob(active, managed, enginePath, ai);
+    active.job = this.runJob(active, managed, enginePath, ai, options);
     return { jobId, paperId: managed.id, title: managed.title };
   }
 
@@ -409,29 +582,48 @@ export class PaperTranslationService {
     paper: Paper,
     enginePath: string,
     ai: AiConfig,
+    options: WholePaperTranslationOptions,
   ): Promise<void> {
     const { info } = active;
     let tempDir: string | null = null;
+    let proxy: OpenAiProxyHandle | null = null;
+    let heartbeat: ReturnType<typeof setInterval> | null = null;
+    let latestActivity: ProxyActivity | null = null;
+    let latestStage: TranslationStage | null = null;
+    let lastLogAt = Date.now();
+    const secrets = [ai.apiKey];
     try {
       tempDir = await this.createTempDirectory();
       active.tempDir = tempDir;
 
+      proxy = await startOpenAiProxy({
+        baseUrl: ai.baseUrl,
+        apiKey: ai.apiKey,
+        onActivity: (activity) => {
+          latestActivity = activity;
+        },
+      });
+      secrets.push(proxy.apiKey);
+
       const configPath = join(tempDir, 'config.toml');
-      await writeFile(configPath, buildTranslationConfig(ai), {
+      await writeFile(configPath, buildTranslationConfig(ai, proxy, options), {
         encoding: 'utf8',
         mode: 0o600,
       });
 
       const outDir = join(tempDir, 'output');
       await mkdir(outDir, { recursive: true });
-      const invocation = buildCommandInvocation(enginePath, [
-        '--config',
-        configPath,
-        '--files',
-        paper.filePathOriginal,
-        '--output',
-        outDir,
-      ]);
+      // Every page, bibliography included, is sent to BabelDOC. The coverage
+      // check below catches any page that still loses content.
+      const storedPages = getPages(this.deps.db, paper.id);
+      const invocation = buildCommandInvocation(
+        enginePath,
+        buildTranslationArgs({
+          configPath,
+          filePathOriginal: paper.filePathOriginal,
+          outDir,
+        }),
+      );
 
       // A cancel that arrived while the temp files were being written must
       // win over starting the engine.
@@ -440,15 +632,56 @@ export class PaperTranslationService {
         return;
       }
 
+      const stopHeartbeat = (): void => {
+        if (heartbeat !== null) {
+          clearInterval(heartbeat);
+          heartbeat = null;
+        }
+      };
+      // Start the heartbeat before the engine runs so the layout-parsing phase
+      // also shows movement; nothing else prints during it.
+      heartbeat = setInterval(() => {
+        if (info.status !== 'running') {
+          return;
+        }
+        const now = Date.now();
+        const line = heartbeatLine(
+          latestActivity,
+          now - info.startedAt,
+          info.percent,
+          latestStage,
+        );
+        info.line = line;
+        // Only add a line while the engine itself is silent; real engine
+        // output is already streaming into the log.
+        const appendLog = now - lastLogAt >= HEARTBEAT_LOG_INTERVAL_MS;
+        if (appendLog) {
+          lastLogAt = now;
+          info.logs = [...info.logs, line].slice(-MAX_LOG_LINES);
+        }
+        this.emitSafely('translation:progress', {
+          jobId: info.jobId,
+          paperId: info.paperId,
+          percent: info.percent,
+          line,
+          appendLog,
+        } satisfies TranslationProgressEvent);
+      }, HEARTBEAT_INTERVAL_MS);
+
       const result = await this.deps.runner.run({
         jobId: info.jobId,
         kind: 'translate',
         command: invocation,
-        redact: [ai.apiKey],
+        redact: secrets,
         parsePercent: parsePercentLine,
         onLine: (rawLine, percent) => {
-          const line = redactSecrets(rawLine, [ai.apiKey]);
+          const line = redactSecrets(rawLine, secrets);
           info.line = line;
+          lastLogAt = Date.now();
+          const stage = translationStage(line);
+          if (stage !== null) {
+            latestStage = stage;
+          }
           const nextPercent = percent ?? parsePercentLine(line);
           if (nextPercent !== null) {
             info.percent = nextPercent;
@@ -462,6 +695,7 @@ export class PaperTranslationService {
           } satisfies TranslationProgressEvent);
         },
       });
+      stopHeartbeat();
 
       if (result.canceled || active.cancelRequested) {
         this.finishCanceled(info);
@@ -473,19 +707,58 @@ export class PaperTranslationService {
       // The runner also exposes the complete redacted output; prefer it over
       // the per-line snapshots because a runner may buffer its lines.
       const outputLines = (result.lines.length > 0 ? result.lines : info.logs)
-        .map((line) => redactSecrets(line, [ai.apiKey]))
+        .map((line) => redactSecrets(line, secrets))
         .slice(-MAX_LOG_LINES);
       info.logs = outputLines;
       if (result.code !== 0) {
         throw new Error(classifyFailure(outputLines));
       }
 
+      // A translation request that exhausted its retries means at least one
+      // paragraph has no translation, even if the page-level audit happens to
+      // stay above its threshold. Never bind that output.
+      const proxyFailure = proxy.getFailure();
+      if (proxyFailure !== null) {
+        throw new Error(
+          proxyFailure === 'empty'
+            ? TRANSLATION_PAPER_EMPTY_RESULT
+            : proxyFailure === 'unreachable'
+              ? NETWORK_FAILURE_MESSAGE
+              : GENERIC_FAILURE_MESSAGE,
+        );
+      }
+
       const files = await collectOutputFiles(outDir);
       const monoPath = chooseMono(files, pdfStem(paper.filePathOriginal));
       const dualPath = chooseDual(files, monoPath);
-      const pageCountTranslated = await validatePdfOutput(monoPath);
-      if (dualPath !== null) {
-        await validatePdfOutput(dualPath);
+      const monoPageCount = await validatePdfOutput(monoPath);
+      const dualPageCount =
+        dualPath === null ? null : await validatePdfOutput(dualPath);
+
+      // A mono page whose Chinese translation collapsed is unusable. The dual
+      // output keeps the original text alongside the translation, so it can
+      // stand in when only the mono layout lost content; if it is missing or
+      // its translation is also incomplete, fail instead of binding a lossy
+      // translation.
+      let primary: 'mono' | 'dual' = 'mono';
+      let pageCountTranslated = monoPageCount;
+      const monoPages = await extractOutputPages(monoPath);
+      if (
+        monoPages !== null &&
+        findIncompletePages(storedPages, monoPages).length > 0
+      ) {
+        if (dualPath === null || dualPageCount === null) {
+          throw new Error(TRANSLATION_OUTPUT_INCOMPLETE);
+        }
+        const dualPages = await extractOutputPages(dualPath);
+        if (
+          dualPages !== null &&
+          findIncompletePages(storedPages, dualPages).length > 0
+        ) {
+          throw new Error(TRANSLATION_OUTPUT_INCOMPLETE);
+        }
+        primary = 'dual';
+        pageCountTranslated = dualPageCount;
       }
       // Validation is asynchronous: a cancel that arrived while page counts
       // were read must win before any file is copied or backed up.
@@ -497,9 +770,10 @@ export class PaperTranslationService {
       const updated = await this.bindOutput(
         paper,
         info,
-        ai.apiKey,
+        secrets,
         monoPath,
         dualPath,
+        primary,
         pageCountTranslated,
         () => active.cancelRequested,
       );
@@ -508,17 +782,19 @@ export class PaperTranslationService {
         this.finishCanceled(info);
         return;
       }
+      const message = primary === 'dual' ? TRANSLATION_DONE_DUAL : TRANSLATION_DONE;
       info.status = 'done';
       info.percent = 100;
-      info.line = '翻译完成';
+      info.line = message;
       info.error = null;
       this.emitSafely('translation:done', {
         jobId: info.jobId,
         paper: updated,
+        message,
       } satisfies TranslationDoneEvent);
     } catch (error) {
       if (info.status === 'running') {
-        const message = this.failureMessage(error, ai.apiKey, info.logs);
+        const message = this.failureMessage(error, secrets, info.logs);
         info.status = 'failed';
         info.error = message;
         info.line = message;
@@ -529,9 +805,17 @@ export class PaperTranslationService {
         } satisfies TranslationFailedEvent);
       }
     } finally {
-      // Cleanup order matters: the temp directory is removed even when the
-      // lease release (which notifies the renderer) fails, and no cleanup step
-      // may turn this job into an unhandled rejection.
+      if (heartbeat !== null) {
+        clearInterval(heartbeat);
+        heartbeat = null;
+      }
+      // Cleanup order matters: the local relay is closed, then the temp
+      // directory is removed, even when the lease release (which notifies the
+      // renderer) fails. No cleanup step may turn this job into an unhandled
+      // rejection.
+      if (proxy !== null) {
+        await proxy.close().catch(() => undefined);
+      }
       if (tempDir !== null) {
         await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
       }
@@ -561,8 +845,8 @@ export class PaperTranslationService {
    * A failed job's message must stay Chinese and must never contain the key.
    * Unexpected English transport errors fall back to a classified message.
    */
-  private failureMessage(error: unknown, apiKey: string, lines: string[]): string {
-    const raw = redactSecrets(errorMessage(error), [apiKey]);
+  private failureMessage(error: unknown, secrets: string[], lines: string[]): string {
+    const raw = redactSecrets(errorMessage(error), secrets);
     if (hasChinese(raw)) {
       return raw;
     }
@@ -596,18 +880,23 @@ export class PaperTranslationService {
   private async bindOutput(
     paper: Paper,
     info: TranslationJobInfo,
-    apiKey: string,
+    secrets: string[],
     monoPath: string,
     dualPath: string | null,
+    primary: 'mono' | 'dual',
     pageCountTranslated: number,
     shouldCancel: () => boolean,
   ): Promise<Paper | null> {
     if (paper.storageDir === null) {
       throw new Error(INVALID_MANAGED_PATH_MESSAGE);
     }
+    if (primary === 'dual' && dualPath === null) {
+      throw new Error(TRANSLATION_OUTPUT_INCOMPLETE);
+    }
     const root = this.deps.getRoot();
     const finalMono = storageFile(root, paper.storageDir, BABELDOC_MONO_NAME);
     const finalDual = storageFile(root, paper.storageDir, BABELDOC_DUAL_NAME);
+    const finalPrimary = primary === 'dual' ? finalDual : finalMono;
     const jobId = info.jobId;
     const newMono = `${finalMono}.new-${jobId}`;
     const newDual = dualPath === null ? null : `${finalDual}.new-${jobId}`;
@@ -677,7 +966,7 @@ export class PaperTranslationService {
 
       const current = getPaper(this.deps.db, paper.id) ?? paper;
       const updated = updatePaper(this.deps.db, paper.id, {
-        filePathTranslated: finalMono,
+        filePathTranslated: finalPrimary,
         pageCountTranslated,
         lastPageTranslated: Math.min(
           Math.max(1, current.lastPageTranslated),
@@ -698,7 +987,7 @@ export class PaperTranslationService {
       // inspected; the user-facing card only sees a fixed Chinese message.
       info.logs = [
         ...info.logs,
-        redactSecrets(`${BINDING_FAILED_DETAIL_PREFIX}${errorMessage(error)}`, [apiKey]),
+        redactSecrets(`${BINDING_FAILED_DETAIL_PREFIX}${errorMessage(error)}`, secrets),
       ].slice(-MAX_LOG_LINES);
       throw new Error(BINDING_FAILED_MESSAGE);
     }

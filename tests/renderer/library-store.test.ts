@@ -1,12 +1,34 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PaperLensApi } from '@shared/ipc';
-import type { ImportPaperResult, Paper } from '@shared/types';
+import type { ImportPaperResult, Paper, PaperFileStatus } from '@shared/types';
 import { useLibraryStore } from '@renderer/stores/library';
 
 type PaperUpdatePatch = Parameters<PaperLensApi['papers']['update']>[1];
 
-type FileCheck = { id: number; originalExists: boolean; translatedExists: boolean };
+function fileCheck(
+  id: number,
+  originalExists: boolean,
+  translatedExists: boolean,
+  bilingualExists = false,
+  translatedIsBilingual = false,
+): PaperFileStatus {
+  return { id, originalExists, translatedExists, bilingualExists, translatedIsBilingual };
+}
+
+function fileStatus(
+  originalExists: boolean,
+  translatedExists: boolean,
+  bilingualExists = false,
+  translatedIsBilingual = false,
+): {
+  originalExists: boolean;
+  translatedExists: boolean;
+  bilingualExists: boolean;
+  translatedIsBilingual: boolean;
+} {
+  return { originalExists, translatedExists, bilingualExists, translatedIsBilingual };
+}
 
 function makePaper(overrides: Partial<Paper> = {}): Paper {
   return {
@@ -41,7 +63,7 @@ function installApi() {
       async (_id: number, _patch: PaperUpdatePatch): Promise<Paper> => makePaper(),
     ),
     remove: vi.fn(async (_id: number): Promise<void> => undefined),
-    checkFiles: vi.fn(async (): Promise<FileCheck[]> => []),
+    checkFiles: vi.fn(async (): Promise<PaperFileStatus[]> => []),
     relocate: vi.fn(
       async (_id: number, _version: 'original' | 'translated'): Promise<Paper | null> => null,
     ),
@@ -65,8 +87,8 @@ describe('useLibraryStore.load', () => {
     ];
     api.list.mockResolvedValue(papers);
     api.checkFiles.mockResolvedValue([
-      { id: 1, originalExists: true, translatedExists: false },
-      { id: 2, originalExists: false, translatedExists: true },
+      fileCheck(1, true, false),
+      fileCheck(2, false, true),
     ]);
 
     await useLibraryStore.getState().load();
@@ -75,7 +97,7 @@ describe('useLibraryStore.load', () => {
     expect(state.papers).toHaveLength(2);
     expect(state.papers.map((paper) => paper.id)).toEqual([1, 2]);
     expect(state.loading).toBe(false);
-    expect(state.fileStatus[1]).toEqual({ originalExists: true, translatedExists: false });
+    expect(state.fileStatus[1]).toEqual(fileStatus(true, false));
     expect(state.fileStatus[2].originalExists).toBe(false);
     expect(state.fileStatus[2].translatedExists).toBe(true);
   });
@@ -86,6 +108,23 @@ describe('useLibraryStore.load', () => {
     await expect(useLibraryStore.getState().load()).rejects.toThrow('数据库损坏');
 
     expect(useLibraryStore.getState().loading).toBe(false);
+  });
+});
+
+describe('useLibraryStore.refreshFileStatus', () => {
+  it('只更新文件状态，不重新读取文献列表', async () => {
+    useLibraryStore.setState({
+      papers: [makePaper({ id: 1 })],
+      fileStatus: { 1: fileStatus(false, false) },
+    });
+    api.checkFiles.mockResolvedValue([fileCheck(1, true, false)]);
+
+    await useLibraryStore.getState().refreshFileStatus();
+
+    const state = useLibraryStore.getState();
+    expect(state.fileStatus[1]).toEqual(fileStatus(true, false));
+    expect(state.papers).toHaveLength(1);
+    expect(api.list).not.toHaveBeenCalled();
   });
 });
 
@@ -102,7 +141,7 @@ describe('useLibraryStore.importPaper', () => {
     expect(returned).toEqual(result);
     expect(state.papers).toHaveLength(3);
     expect(state.papers[0]).toEqual(imported);
-    expect(state.fileStatus[3]).toEqual({ originalExists: true, translatedExists: false });
+    expect(state.fileStatus[3]).toEqual(fileStatus(true, false));
   });
 
   it('重复导入不新增行，返回已有文献结果', async () => {
@@ -115,6 +154,37 @@ describe('useLibraryStore.importPaper', () => {
 
     expect(returned).toEqual(result);
     expect(useLibraryStore.getState().papers).toEqual([existing]);
+  });
+
+  it('恢复的重复文献替换原卡片并更新文件状态', async () => {
+    const stale = makePaper({
+      id: 2,
+      title: '曾丢失',
+      filePathOriginal: 'C:/papers/gone.pdf',
+    });
+    useLibraryStore.setState({
+      papers: [makePaper({ id: 1 }), stale],
+      fileStatus: { 2: fileStatus(false, false) },
+    });
+    const restored = makePaper({
+      id: 2,
+      title: '曾丢失',
+      filePathOriginal: 'C:/library/papers/曾丢失 (2)/original.pdf',
+    });
+    const result: ImportPaperResult = {
+      paper: restored,
+      duplicate: true,
+      restored: true,
+    };
+    api.importOriginal.mockResolvedValue(result);
+
+    const returned = await useLibraryStore.getState().importPaper();
+
+    const state = useLibraryStore.getState();
+    expect(returned).toEqual(result);
+    expect(state.papers).toHaveLength(2);
+    expect(state.papers[1]).toEqual(restored);
+    expect(state.fileStatus[2]).toEqual(fileStatus(true, false));
   });
 
   it('用户取消导入时列表不变并返回 null', async () => {
@@ -133,8 +203,8 @@ describe('useLibraryStore.removePaper', () => {
     useLibraryStore.setState({
       papers: [makePaper({ id: 1 }), makePaper({ id: 2 })],
       fileStatus: {
-        1: { originalExists: true, translatedExists: false },
-        2: { originalExists: true, translatedExists: true },
+        1: fileStatus(true, false),
+        2: fileStatus(true, true),
       },
     });
     api.remove.mockResolvedValue(undefined);
@@ -145,7 +215,7 @@ describe('useLibraryStore.removePaper', () => {
     const state = useLibraryStore.getState();
     expect(state.papers.map((paper) => paper.id)).toEqual([2]);
     expect(state.fileStatus[1]).toBeUndefined();
-    expect(state.fileStatus[2]).toEqual({ originalExists: true, translatedExists: true });
+    expect(state.fileStatus[2]).toEqual(fileStatus(true, true));
   });
 });
 
@@ -161,8 +231,8 @@ describe('useLibraryStore.relocate', () => {
     api.relocate.mockResolvedValue(updated);
     api.list.mockResolvedValueOnce(before).mockResolvedValueOnce([makePaper({ id: 1 }), updated]);
     api.checkFiles.mockResolvedValue([
-      { id: 1, originalExists: true, translatedExists: false },
-      { id: 2, originalExists: true, translatedExists: false },
+      fileCheck(1, true, false),
+      fileCheck(2, true, false),
     ]);
 
     await useLibraryStore.getState().load();
@@ -173,7 +243,7 @@ describe('useLibraryStore.relocate', () => {
     expect(api.checkFiles).toHaveBeenCalledTimes(2);
     const state = useLibraryStore.getState();
     expect(state.papers.find((paper) => paper.id === 2)?.title).toBe('新标题');
-    expect(state.fileStatus[2]).toEqual({ originalExists: true, translatedExists: false });
+    expect(state.fileStatus[2]).toEqual(fileStatus(true, false));
   });
 });
 
@@ -186,7 +256,7 @@ describe('useLibraryStore.attachTranslated', () => {
     });
     useLibraryStore.setState({
       papers: [makePaper({ id: 1 }), makePaper({ id: 2 })],
-      fileStatus: { 2: { originalExists: true, translatedExists: false } },
+      fileStatus: { 2: fileStatus(true, false) },
     });
     api.attachTranslated.mockResolvedValue(bound);
 
@@ -196,7 +266,7 @@ describe('useLibraryStore.attachTranslated', () => {
     expect(api.attachTranslated).toHaveBeenCalledWith(2);
     expect(returned).toEqual(bound);
     expect(state.papers[1]).toEqual(bound);
-    expect(state.fileStatus[2]).toEqual({ originalExists: true, translatedExists: true });
+    expect(state.fileStatus[2]).toEqual(fileStatus(true, true));
   });
 
   it('替换已有译本前先确认，取消时不发起 IPC', async () => {

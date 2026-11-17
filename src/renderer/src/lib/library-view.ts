@@ -31,12 +31,27 @@ export function isTranslatedBound(paper: Paper): boolean {
   return paper.filePathTranslated !== null && paper.filePathTranslated !== '';
 }
 
+export type MissingKind = 'original' | 'translation';
+
+/** Which bound file is gone, or null when every bound file exists. */
+export function missingKind(
+  paper: Paper,
+  status: FileStatus | undefined,
+): MissingKind | null {
+  if (status === undefined) {
+    return null;
+  }
+  if (!status.originalExists) {
+    return 'original';
+  }
+  return isTranslatedBound(paper) && !status.translatedExists
+    ? 'translation'
+    : null;
+}
+
 /** A paper is missing when a file its metadata points at no longer exists. */
 export function isPaperMissing(paper: Paper, status: FileStatus | undefined): boolean {
-  if (status === undefined) {
-    return false;
-  }
-  return !status.originalExists || (isTranslatedBound(paper) && !status.translatedExists);
+  return missingKind(paper, status) !== null;
 }
 
 /** Reading progress in the original PDF, clamped to 0–100. */

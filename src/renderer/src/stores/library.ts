@@ -1,18 +1,22 @@
 import { create } from 'zustand';
-import type { ImportPaperResult, Paper, PaperUpdatePatch } from '@shared/types';
+import type {
+  ImportPaperResult,
+  Paper,
+  PaperFileStatus,
+  PaperUpdatePatch,
+} from '@shared/types';
 
 export type { PaperUpdatePatch };
 
-export interface FileStatus {
-  originalExists: boolean;
-  translatedExists: boolean;
-}
+export type FileStatus = Omit<PaperFileStatus, 'id'>;
 
 export interface LibraryState {
   papers: Paper[];
   loading: boolean;
   fileStatus: Record<number, FileStatus>;
   load(): Promise<void>;
+  /** Re-checks bound files without reloading the paper list. */
+  refreshFileStatus(): Promise<void>;
   importPaper(): Promise<ImportPaperResult | null>;
   attachTranslated(id: number): Promise<Paper | null>;
   relocate(id: number, version: 'original' | 'translated'): Promise<void>;
@@ -21,6 +25,21 @@ export interface LibraryState {
 }
 
 const REPLACE_TRANSLATION_CONFIRM = '该文献已有译本，确定用新文件替换吗？';
+
+function toFileStatusMap(
+  statuses: PaperFileStatus[],
+): Record<number, FileStatus> {
+  const fileStatus: Record<number, FileStatus> = {};
+  for (const status of statuses) {
+    fileStatus[status.id] = {
+      originalExists: status.originalExists,
+      translatedExists: status.translatedExists,
+      bilingualExists: status.bilingualExists,
+      translatedIsBilingual: status.translatedIsBilingual,
+    };
+  }
+  return fileStatus;
+}
 
 export const useLibraryStore = create<LibraryState>()((set, get) => ({
   papers: [],
@@ -32,17 +51,15 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
     try {
       const papers = await window.api.papers.list();
       const statuses = await window.api.papers.checkFiles();
-      const fileStatus: Record<number, FileStatus> = {};
-      for (const status of statuses) {
-        fileStatus[status.id] = {
-          originalExists: status.originalExists,
-          translatedExists: status.translatedExists,
-        };
-      }
-      set({ papers, fileStatus });
+      set({ papers, fileStatus: toFileStatusMap(statuses) });
     } finally {
       set({ loading: false });
     }
+  },
+
+  async refreshFileStatus() {
+    const statuses = await window.api.papers.checkFiles();
+    set({ fileStatus: toFileStatusMap(statuses) });
   },
 
   async importPaper() {
@@ -50,14 +67,37 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
     if (result === null) {
       return null;
     }
-    // A duplicate already has a row; leave the list untouched so the caller
-    // can simply highlight the existing card.
-    if (!result.duplicate) {
+    // A plain duplicate already has a working row; leave the list untouched so
+    // the caller can simply highlight the existing card. A restored duplicate
+    // was re-copied into that row, so replace its stale card and status.
+    if (result.restored === true) {
+      set((state) => ({
+        papers: state.papers.some((paper) => paper.id === result.paper.id)
+          ? state.papers.map((paper) =>
+              paper.id === result.paper.id ? result.paper : paper,
+            )
+          : [result.paper, ...state.papers],
+        fileStatus: {
+          ...state.fileStatus,
+          [result.paper.id]: {
+            originalExists: true,
+            translatedExists: result.paper.filePathTranslated !== null,
+            bilingualExists: false,
+            translatedIsBilingual: false,
+          },
+        },
+      }));
+    } else if (!result.duplicate) {
       set((state) => ({
         papers: [result.paper, ...state.papers],
         fileStatus: {
           ...state.fileStatus,
-          [result.paper.id]: { originalExists: true, translatedExists: false },
+          [result.paper.id]: {
+            originalExists: true,
+            translatedExists: false,
+            bilingualExists: false,
+            translatedIsBilingual: false,
+          },
         },
       }));
     }
@@ -82,6 +122,8 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
         [paper.id]: {
           originalExists: state.fileStatus[paper.id]?.originalExists ?? true,
           translatedExists: true,
+          bilingualExists: false,
+          translatedIsBilingual: false,
         },
       },
     }));

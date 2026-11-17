@@ -62,10 +62,21 @@ describe('ToolJobRunner', () => {
       canceled: false,
       timedOut: false,
     });
-    expect(spawn).toHaveBeenCalledWith('babeldoc.exe', ['--warmup'], {
-      windowsHide: true,
-      stdio: ['ignore', 'pipe', 'pipe'],
-    });
+    expect(spawn).toHaveBeenCalledWith(
+      'babeldoc.exe',
+      ['--warmup'],
+      expect.objectContaining({
+        windowsHide: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: expect.objectContaining({
+          PYTHONIOENCODING: 'utf-8',
+          PYTHONUTF8: '1',
+          PYTHONUNBUFFERED: '1',
+          COLUMNS: '200',
+          NO_COLOR: '1',
+        }),
+      }),
+    );
     expect(runner.activeJobIds()).toEqual([]);
 
     const progress = events
@@ -105,6 +116,34 @@ describe('ToolJobRunner', () => {
       code: 1,
       signal: null,
       lines: ['warn [REDACTED] axb', 'hello world', 'tail'],
+      canceled: false,
+      timedOut: false,
+    });
+  });
+
+  it('按单独回车拆分行内进度刷新，且不把 CRLF 拆成空行', async () => {
+    const child = fakeChild();
+    const runner = new ToolJobRunner(() => {}, {
+      spawn: spawnReturning(child),
+      killTree: vi.fn(),
+    });
+
+    const promise = runner.run({
+      jobId: 'job-cr',
+      kind: 'translate',
+      command: { file: 'babeldoc.exe', args: [] },
+    });
+
+    // BabelDOC's rich progress refreshes with a bare \r inside a pipe; the
+    // intermediate update must surface as its own line, not stay buffered.
+    child.stdout.emit('data', Buffer.from('translate 10/100\rtranslate 20/100\r'));
+    child.stdout.emit('data', Buffer.from('progress 42%\r\nfinal'));
+    child.emit('close', 0, null);
+
+    await expect(promise).resolves.toEqual({
+      code: 0,
+      signal: null,
+      lines: ['translate 10/100', 'translate 20/100', 'progress 42%', 'final'],
       canceled: false,
       timedOut: false,
     });

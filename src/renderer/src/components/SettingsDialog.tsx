@@ -1,37 +1,42 @@
 import { useEffect, useState } from 'react';
 import { useAppSettingsStore } from '../stores/app-settings';
 import { AiSettingsTab } from './settings/AiSettingsTab';
+import { AppearanceSettingsTab } from './settings/AppearanceSettingsTab';
 import { EngineSettingsTab } from './settings/EngineSettingsTab';
 import { LibrarySettingsTab } from './settings/LibrarySettingsTab';
+import { TutorialSettingsTab } from './settings/TutorialSettingsTab';
 
-export type SettingsTab = 'ai' | 'library' | 'engine';
+export type SettingsTab =
+  | 'ai'
+  | 'library'
+  | 'engine'
+  | 'appearance'
+  | 'tutorial';
 
 export interface SettingsDialogProps {
   onClose(): void;
   initialTab?: SettingsTab;
+  /** Reopens the first-run wizard; the App closes this dialog first. */
+  onReplayOnboarding?: () => void;
 }
 
 const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
   { id: 'ai', label: 'AI 接口' },
   { id: 'library', label: '文献库' },
   { id: 'engine', label: '翻译引擎' },
-];
-
-const SHORTCUTS: Array<{ keys: string; label: string }> = [
-  { keys: 'Ctrl+Shift+T', label: '切译本' },
-  { keys: 'Ctrl+K', label: '搜索' },
-  { keys: 'Ctrl+F', label: '页内搜索' },
-  { keys: 'Ctrl+Enter', label: '发送' },
+  { id: 'appearance', label: '外观' },
+  { id: 'tutorial', label: '教程' },
 ];
 
 /**
  * Modal settings shell. All tab panels stay mounted and only the inactive ones
  * are hidden, so an unsaved AI draft survives switching tabs. Escape and a
- * backdrop click close the whole dialog; the shortcut list is shared.
+ * backdrop click close the whole dialog.
  */
 export function SettingsDialog({
   onClose,
   initialTab = 'ai',
+  onReplayOnboarding,
 }: SettingsDialogProps): React.JSX.Element {
   const [tab, setTab] = useState<SettingsTab>(initialTab);
 
@@ -101,17 +106,23 @@ export function SettingsDialog({
           <EngineSettingsTab />
         </div>
 
-        <section className="settings-shortcuts" aria-label="快捷键">
-          <h3>快捷键</h3>
-          <ul>
-            {SHORTCUTS.map((shortcut) => (
-              <li key={shortcut.keys}>
-                <kbd>{shortcut.keys}</kbd>
-                <span>{shortcut.label}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
+        <div
+          className="settings-panel"
+          role="tabpanel"
+          aria-label="外观"
+          hidden={tab !== 'appearance'}
+        >
+          <AppearanceSettingsTab />
+        </div>
+
+        <div
+          className="settings-panel"
+          role="tabpanel"
+          aria-label="教程"
+          hidden={tab !== 'tutorial'}
+        >
+          <TutorialSettingsTab onReplayOnboarding={onReplayOnboarding} />
+        </div>
       </div>
     </div>
   );

@@ -177,7 +177,14 @@ export class PaperLibrary {
     if (hash !== null) {
       const duplicate = findPaperByHash(this.db, hash);
       if (duplicate !== null) {
-        return { paper: duplicate, duplicate: true };
+        // A row can outlive its file: the folder was deleted in Explorer or
+        // only `original.pdf` was removed. Returning that row leaves the user
+        // with an unopenable card they cannot re-import, so copy the selected
+        // file back into the existing row instead.
+        if (existsSync(duplicate.filePathOriginal)) {
+          return { paper: duplicate, duplicate: true };
+        }
+        return await this.reviveDuplicate(duplicate, sourcePath, hash);
       }
     }
 
@@ -231,6 +238,59 @@ export class PaperLibrary {
       }
       throw error;
     }
+  }
+
+  /**
+   * Restores a hash-duplicate whose original file disappeared. The row keeps
+   * its id, notes, conversations, tags and folder assignment; only file paths
+   * and extracted page data are refreshed. A translation binding whose file is
+   * gone is cleared so the card cannot offer a missing version.
+   */
+  private async reviveDuplicate(
+    duplicate: Paper,
+    sourcePath: string,
+    hash: string,
+  ): Promise<ImportPaperResult> {
+    const extracted = await this.extract(sourcePath);
+    const root = this.getRoot();
+    const storageDir =
+      duplicate.storageDir !== null &&
+      isCanonicalStorageDir(duplicate.storageDir, duplicate.id)
+        ? duplicate.storageDir
+        : canonicalStorageDir(duplicate.id, duplicate.title);
+    const folder = join(root, storageDir);
+    const target = join(folder, ORIGINAL_PDF_NAME);
+
+    try {
+      await mkdir(join(folder, 'notes'), { recursive: true });
+    } catch (error) {
+      throw new Error(`创建文献文件夹失败：${errorMessage(error)}`);
+    }
+    if (!samePath(sourcePath, target)) {
+      await this.copyOriginal(sourcePath, target);
+    }
+
+    const translationMissing =
+      duplicate.filePathTranslated === null ||
+      !existsSync(duplicate.filePathTranslated);
+    const updated = updatePaper(this.db, duplicate.id, {
+      storageDir,
+      filePathOriginal: target,
+      pageCountOriginal: extracted.pageCount,
+      hasTextLayer: extracted.hasTextLayer,
+      outline: extracted.outline,
+      fileHash: hash,
+      lastPageOriginal: Math.min(duplicate.lastPageOriginal, extracted.pageCount),
+      ...(translationMissing
+        ? {
+            filePathTranslated: null,
+            pageCountTranslated: null,
+            lastPageTranslated: 1,
+          }
+        : {}),
+    });
+    replacePages(this.db, duplicate.id, extracted.pages);
+    return { paper: updated, duplicate: true, restored: true };
   }
 
   async attachTranslated(paperId: number, sourcePath: string): Promise<Paper> {

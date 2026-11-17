@@ -1,11 +1,23 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ChatMessage, Note, Paper } from '@shared/types';
-import { findAssistantSourcePage, suggestAiNoteTitle } from '../lib/chat-note';
+import type {
+  ChatContextMode,
+  ChatMessage,
+  Note,
+  Paper,
+  StickyNote,
+  StickyNoteAnchor,
+} from '@shared/types';
+import {
+  findAssistantAnchor,
+  findAssistantSourcePage,
+  suggestAiNoteTitle,
+} from '../lib/chat-note';
 import { errorMessage } from '../lib/errors';
 import { readAssistantSelection } from '../lib/selection-markdown';
 import { useChatStore } from '../stores/chat';
 import { useReaderStore } from '../stores/reader';
 import type { ReaderSelection } from '../stores/reader';
+import { useStickyNotesStore } from '../stores/sticky-notes';
 import { ChatNoteDialog } from './ChatNoteDialog';
 import type { ChatNoteDraft } from './ChatNoteDialog';
 import { MarkdownView } from './MarkdownView';
@@ -18,6 +30,8 @@ interface ChatPanelProps {
   onPendingImageConsumed?: () => void;
   /** Opens a saved note in the notes tab. */
   onOpenNote(noteId: number): void;
+  /** Switches to the sticky tab, jumping to the note's page and version. */
+  onOpenSticky?(note: StickyNote): void;
 }
 
 interface SelectionMenuState {
@@ -29,6 +43,28 @@ interface SelectionMenuState {
   below: boolean;
 }
 
+const CONTEXT_MODES: Array<{
+  id: ChatContextMode;
+  label: string;
+  description: string;
+}> = [
+  {
+    id: 'page',
+    label: '仅本页',
+    description: '附带文献信息、目录、当前页正文；有选文时一并发送',
+  },
+  {
+    id: 'full',
+    label: '全文',
+    description: '附带整篇正文；超出上下文预算时自动挑选相关页',
+  },
+  {
+    id: 'conversation',
+    label: '纯聊天',
+    description: '不自动附带论文页面；手动选中的文字和截图仍会发送',
+  },
+];
+
 function truncate(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max)}…` : text;
 }
@@ -38,6 +74,7 @@ export function ChatPanel({
   pendingImage = null,
   onPendingImageConsumed,
   onOpenNote,
+  onOpenSticky,
 }: ChatPanelProps): React.JSX.Element {
   const paperId = paper.id;
   const conversations = useChatStore((state) => state.conversations);
@@ -45,7 +82,7 @@ export function ChatPanel({
   const messages = useChatStore((state) => state.messages);
   const streamingByRequest = useChatStore((state) => state.streamingByRequest);
   const error = useChatStore((state) => state.error);
-  const fullTextMode = useChatStore((state) => state.fullTextMode);
+  const contextMode = useChatStore((state) => state.contextMode);
   const activeRequestId = useChatStore((state) => state.activeRequestId);
   const lastFailedSendArgs = useChatStore((state) => state.lastFailedSendArgs);
   const focusTrigger = useChatStore((state) => state.focusTrigger);
@@ -57,7 +94,7 @@ export function ChatPanel({
   const send = useChatStore((state) => state.send);
   const retryLast = useChatStore((state) => state.retryLast);
   const abort = useChatStore((state) => state.abort);
-  const setFullTextMode = useChatStore((state) => state.setFullTextMode);
+  const setContextMode = useChatStore((state) => state.setContextMode);
 
   const readerSelection = useReaderStore((state) => state.selection);
   const currentPage = useReaderStore((state) => state.currentPage);
@@ -70,6 +107,8 @@ export function ChatPanel({
   const [selectionMenu, setSelectionMenu] = useState<SelectionMenuState | null>(null);
   const [noteDraft, setNoteDraft] = useState<ChatNoteDraft | null>(null);
   const [savedNote, setSavedNote] = useState<Note | null>(null);
+  const [savedSticky, setSavedSticky] = useState<StickyNote | null>(null);
+  const [savingStickyId, setSavingStickyId] = useState<number | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const messagesRef = useRef<HTMLDivElement | null>(null);
   const selectionPopupRef = useRef<HTMLDivElement | null>(null);
@@ -92,6 +131,8 @@ export function ChatPanel({
     setSelectionMenu(null);
     setNoteDraft(null);
     setSavedNote(null);
+    setSavedSticky(null);
+    setSavingStickyId(null);
   }, [paperId]);
 
   // `requestFocus` (bumped by App when 问 AI is clicked) focuses the textarea.
@@ -187,6 +228,53 @@ export function ChatPanel({
     });
     setSelectionMenu(null);
     window.getSelection()?.removeAllRanges();
+  };
+
+  // Sticky notes anchor to the question's selection only while that exact
+  // selection is still live in the reader; otherwise they become a page-level
+  // note on the question's page.
+  const saveMessageAsSticky = async (message: ChatMessage): Promise<void> => {
+    if (savingStickyId !== null) {
+      return;
+    }
+    setPanelError(null);
+    setSavingStickyId(message.id);
+    try {
+      const reader = useReaderStore.getState();
+      const target = findAssistantAnchor(messages, message.id, reader.currentPage);
+      const currentSelection = reader.selection;
+      let anchor: StickyNoteAnchor = { kind: 'page' };
+      let quote = target.selectionText ?? '';
+      if (
+        currentSelection !== null &&
+        target.selectionText !== undefined &&
+        currentSelection.version === reader.version &&
+        currentSelection.pageNo === target.pageNo &&
+        currentSelection.text.trim() === target.selectionText &&
+        currentSelection.rects.length > 0
+      ) {
+        anchor = { kind: 'text', rects: currentSelection.rects };
+        quote = currentSelection.text;
+      }
+      const created = await useStickyNotesStore.getState().create({
+        paperId: paper.id,
+        pdfVersion: reader.version,
+        pageNo: target.pageNo,
+        quote,
+        contentMd: message.content,
+        anchor,
+        source: 'ai',
+        // New note cards open draggable and keep the position they are dropped at.
+        popup: { mode: 'free', x: 0.5, y: 0.25 },
+      });
+      if (created === null) {
+        setPanelError(useStickyNotesStore.getState().error ?? '保存标注失败');
+        return;
+      }
+      setSavedSticky(created);
+    } finally {
+      setSavingStickyId(null);
+    }
   };
 
   const runAction = async (action: () => Promise<void>): Promise<void> => {
@@ -386,6 +474,32 @@ export function ChatPanel({
         </div>
       )}
 
+      {savedSticky !== null && (
+        <div className="chat-note-notice" role="status">
+          <span>已保存标注到第 {savedSticky.pageNo} 页</span>
+          {onOpenSticky !== undefined && (
+            <button
+              type="button"
+              className="menu-button"
+              onClick={() => {
+                onOpenSticky(savedSticky);
+                setSavedSticky(null);
+              }}
+            >
+              查看标注
+            </button>
+          )}
+          <button
+            type="button"
+            className="chat-note-notice-close"
+            aria-label="关闭标注提示"
+            onClick={() => setSavedSticky(null)}
+          >
+            ×
+          </button>
+        </div>
+      )}
+
       <div
         className="chat-messages"
         ref={messagesRef}
@@ -441,6 +555,33 @@ export function ChatPanel({
                   </svg>
                   存为笔记
                 </button>
+                <button
+                  type="button"
+                  className="chat-note-button"
+                  title="把这条回答保存为标注"
+                  aria-label="把这条回答保存为标注"
+                  disabled={savingStickyId === message.id}
+                  onClick={() => {
+                    void saveMessageAsSticky(message);
+                  }}
+                >
+                  <svg
+                    width="12"
+                    height="12"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    aria-hidden="true"
+                    focusable="false"
+                  >
+                    <path d="M4 4h16v10l-6 6H4z" />
+                    <path d="M14 20v-6h6" />
+                  </svg>
+                  {savingStickyId === message.id ? '保存中…' : '存为标注'}
+                </button>
               </div>
             )}
           </article>
@@ -492,14 +633,28 @@ export function ChatPanel({
           }}
         />
         <div className="chat-composer-actions">
-          <label className="chat-fulltext">
-            <input
-              type="checkbox"
-              checked={fullTextMode}
-              onChange={(event) => setFullTextMode(event.target.checked)}
-            />
-            全文模式
-          </label>
+          <div
+            className="chat-context-modes"
+            role="radiogroup"
+            aria-label="论文上下文范围"
+          >
+            {CONTEXT_MODES.map((mode) => {
+              const selected = contextMode === mode.id;
+              return (
+                <button
+                  key={mode.id}
+                  type="button"
+                  role="radio"
+                  aria-checked={selected}
+                  className={selected ? 'chat-context-mode active' : 'chat-context-mode'}
+                  title={mode.description}
+                  onClick={() => setContextMode(mode.id)}
+                >
+                  {mode.label}
+                </button>
+              );
+            })}
+          </div>
           <div className="chat-actions">
             {activeRequestId !== null && (
               <button type="button" className="chat-stop" onClick={() => void abort()}>

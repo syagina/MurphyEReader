@@ -1,16 +1,22 @@
 import { create } from 'zustand';
+import { TRANSLATION_REPAIRED_NOTICE } from '@shared/translation';
+import type { PdfVersion, StickyNoteRect } from '@shared/types';
 import { errorMessage } from '../lib/errors';
 import { clampPage } from '../lib/pdf';
 import { resolveToggleTargetPage } from '../lib/toggle';
+import { useLibraryStore } from './library';
 
 export interface ReaderSelection {
   text: string;
   pageNo: number;
+  version: PdfVersion;
+  /** Selection rectangles normalized to the page wrapper. */
+  rects: StickyNoteRect[];
 }
 
 export interface ReaderState {
   paperId: number | null;
-  version: 'original' | 'translated';
+  version: PdfVersion;
   pageCount: number;
   currentPage: number;
   zoom: number;
@@ -20,7 +26,12 @@ export interface ReaderState {
    * The version whose load failed last, when known. The error panel's
    * relocation action targets it instead of the version currently displayed.
    */
-  failedVersion: 'original' | 'translated' | null;
+  failedVersion: PdfVersion | null;
+  /**
+   * One-shot message shown above the PDF after an incomplete managed
+   * translation was silently rebound to its complete dual output.
+   */
+  versionNotice: string | null;
   /**
    * One-shot start page requested for a paper that is about to open. The App
    * stores it before switching papers; the viewer's own `open` consumes it.
@@ -42,11 +53,14 @@ export interface ReaderState {
    */
   clearInitialPage(): void;
   /**
-   * Switches the open reader between the original PDF and its translation.
-   * Only `version`, `pageCount` and `currentPage` change; a failed switch keeps
-   * the current version and reports the failure through `error`.
+   * Switches the open reader between the original PDF and either translated
+   * layout (only translation or bilingual). Only `version`, `pageCount` and
+   * `currentPage` change; a failed switch keeps the current version and reports
+   * the failure through `error`.
    */
-  setVersion(version: 'original' | 'translated'): Promise<void>;
+  setVersion(version: PdfVersion): Promise<void>;
+  /** Hides the auto-repair notice until another translation is repaired. */
+  dismissVersionNotice(): void;
   close(): void;
   setCurrentPage(page: number): void;
   setZoom(z: number): void;
@@ -72,13 +86,14 @@ let openSeq = 0;
 
 interface ReaderFields {
   paperId: number | null;
-  version: 'original' | 'translated';
+  version: PdfVersion;
   pageCount: number;
   currentPage: number;
   zoom: number;
   error: string | null;
   selection: ReaderSelection | null;
-  failedVersion: 'original' | 'translated' | null;
+  failedVersion: PdfVersion | null;
+  versionNotice: string | null;
   pendingInitialPage: { paperId: number; page: number } | null;
 }
 
@@ -92,6 +107,7 @@ function initialFields(): ReaderFields {
     error: null,
     selection: null,
     failedVersion: null,
+    versionNotice: null,
     pendingInitialPage: null,
   };
 }
@@ -180,7 +196,7 @@ export const useReaderStore = create<ReaderState>()((set, get) => ({
         return;
       }
       if (
-        version === 'translated' &&
+        version !== 'original' &&
         (paper.filePathTranslated === null ||
           paper.filePathTranslated === '' ||
           paper.pageCountTranslated === null)
@@ -188,12 +204,17 @@ export const useReaderStore = create<ReaderState>()((set, get) => ({
         set({ error: '未绑定译本', failedVersion: version });
         return;
       }
-      const pageCount =
-        version === 'original' ? paper.pageCountOriginal : (paper.pageCountTranslated ?? 0);
-      await window.api.pdf.load(paperId, version);
+      const loaded = await window.api.pdf.load(paperId, version);
       if (seq !== openSeq) {
         return;
       }
+      const repaired = loaded.repaired === true;
+      const pageCount =
+        version === 'original'
+          ? paper.pageCountOriginal
+          : repaired && loaded.pageCountTranslated !== undefined
+            ? loaded.pageCountTranslated
+            : (paper.pageCountTranslated ?? 0);
       // Resolve after the validation read so a scroll made meanwhile wins: the
       // seq guard above proves the session (and thus `version`) is unchanged.
       const latest = get();
@@ -204,7 +225,7 @@ export const useReaderStore = create<ReaderState>()((set, get) => ({
         lastPageOriginal: paper.lastPageOriginal,
         lastPageTranslated: paper.lastPageTranslated,
         pageCountOriginal: paper.pageCountOriginal,
-        pageCountTranslated: paper.pageCountTranslated,
+        pageCountTranslated: pageCount,
       });
       // `zoom` is intentionally untouched: the reader keeps its scale.
       set({
@@ -214,7 +235,13 @@ export const useReaderStore = create<ReaderState>()((set, get) => ({
         error: null,
         failedVersion: null,
         selection: null,
+        versionNotice: repaired ? TRANSLATION_REPAIRED_NOTICE : null,
       });
+      if (repaired) {
+        // The binding changed on disk and in the database; refresh the
+        // library so cards and the open-paper snapshot agree.
+        void useLibraryStore.getState().load().catch(() => undefined);
+      }
     } catch (error) {
       if (seq !== openSeq) {
         return;
@@ -250,5 +277,9 @@ export const useReaderStore = create<ReaderState>()((set, get) => ({
     // A non-null message means the viewer failed to load the CURRENT document;
     // remember that version so relocation repairs the right file.
     set({ error: message, failedVersion: message === null ? null : get().version });
+  },
+
+  dismissVersionNotice() {
+    set({ versionNotice: null });
   },
 }));

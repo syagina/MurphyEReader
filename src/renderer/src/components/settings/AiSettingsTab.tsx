@@ -1,4 +1,9 @@
 import { useEffect, useState } from 'react';
+import {
+  DEEPSEEK_API_KEY_URL,
+  DEEPSEEK_BASE_URL,
+  DEEPSEEK_CHAT_MODEL,
+} from '@shared/ai-providers';
 import type { AiSettingsInput } from '@shared/types';
 import { useSettingsStore } from '../../stores/settings';
 
@@ -58,7 +63,7 @@ export function AiSettingsTab({ onClose }: AiSettingsTabProps): React.JSX.Elemen
       return null;
     }
     if (tokenBudgetText.trim() === '' || !Number.isFinite(tokenBudget)) {
-      setFormError('全文预算必须是有效数字');
+      setFormError('上下文预算必须是有效数字');
       return null;
     }
     const input: AiSettingsInput = {
@@ -109,6 +114,22 @@ export function AiSettingsTab({ onClose }: AiSettingsTabProps): React.JSX.Elemen
     }
   };
 
+  /** Only endpoint fields change; a typed key and vision model are preserved. */
+  const fillDeepSeek = (): void => {
+    setBaseUrl(DEEPSEEK_BASE_URL);
+    setChatModel(DEEPSEEK_CHAT_MODEL);
+    setFormError(null);
+    setTestResult(null);
+  };
+
+  const openDeepSeekConsole = async (): Promise<void> => {
+    try {
+      await window.api.settings.openDeepSeekConsole();
+    } catch {
+      setFormError(`无法打开浏览器，请手动访问 ${DEEPSEEK_API_KEY_URL}`);
+    }
+  };
+
   const keyPlaceholder = clearKey
     ? '保存后将清除已存密钥'
     : settings?.apiKeySet
@@ -123,13 +144,43 @@ export function AiSettingsTab({ onClose }: AiSettingsTabProps): React.JSX.Elemen
         void handleSave();
       }}
     >
+      <section className="settings-deepseek" aria-label="DeepSeek 快速配置">
+        <div className="settings-deepseek-heading">
+          <span className="settings-deepseek-badge">推荐</span>
+          <h3>推荐使用 DeepSeek API</h3>
+        </div>
+        <p className="settings-deepseek-text">
+          DeepSeek 提供 OpenAI 兼容接口，适合论文问答、划词翻译与整篇翻译。
+          填入配置后，粘贴你在 DeepSeek 开放平台创建的 API Key，保存并测试连接即可。
+        </p>
+        <div className="settings-deepseek-actions">
+          <button type="button" className="menu-button" onClick={fillDeepSeek}>
+            填入 DeepSeek 配置
+          </button>
+          <button
+            type="button"
+            className="menu-button"
+            onClick={() => {
+              void openDeepSeekConsole();
+            }}
+          >
+            获取 DeepSeek API Key
+          </button>
+        </div>
+        <p className="settings-deepseek-url">{DEEPSEEK_API_KEY_URL}</p>
+        <p className="settings-deepseek-note">
+          密钥只保存在本机加密存储中，不会上传到 MurphyEReader 服务器。
+          如需截图提问，请在下方填写支持图片输入的视觉模型。
+        </p>
+      </section>
+
       <label className="settings-field">
         <span>Base URL</span>
         <input
           className="settings-input"
           type="text"
           value={baseUrl}
-          placeholder="https://api.example.com/v1"
+          placeholder={DEEPSEEK_BASE_URL}
           onChange={(event) => setBaseUrl(event.target.value)}
         />
       </label>
@@ -180,7 +231,7 @@ export function AiSettingsTab({ onClose }: AiSettingsTabProps): React.JSX.Elemen
           className="settings-input"
           type="text"
           value={chatModel}
-          placeholder="gpt-4o"
+          placeholder={DEEPSEEK_CHAT_MODEL}
           onChange={(event) => setChatModel(event.target.value)}
         />
       </label>
@@ -191,7 +242,7 @@ export function AiSettingsTab({ onClose }: AiSettingsTabProps): React.JSX.Elemen
           className="settings-input"
           type="text"
           value={visionModel}
-          placeholder="gpt-4o-mini"
+          placeholder="支持图片输入的模型（可选）"
           onChange={(event) => setVisionModel(event.target.value)}
         />
       </label>
@@ -210,7 +261,9 @@ export function AiSettingsTab({ onClose }: AiSettingsTabProps): React.JSX.Elemen
           />
         </label>
         <label className="settings-field">
-          <span>全文预算</span>
+          <span title="每次请求可用的总 token 预算；全文模式超出后会优先挑选相关页">
+            上下文预算
+          </span>
           <input
             className="settings-input"
             type="number"

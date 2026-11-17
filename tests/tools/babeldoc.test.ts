@@ -18,9 +18,13 @@ const ENV = {
 const PATH_BABELDOC = 'C:\\PATH\\babeldoc.exe';
 const PROFILE_BABELDOC = 'C:\\Users\\me\\.local\\bin\\babeldoc.exe';
 const APPDATA_BABELDOC = 'C:\\Users\\me\\AppData\\Roaming\\Python\\Scripts\\babeldoc.exe';
+const MANAGED_BABELDOC =
+  'C:\\Users\\me\\AppData\\Local\\PaperLens\\translation-engine\\bin\\babeldoc.exe';
 const PATH_UV = 'C:\\PATH\\uv.exe';
 const PROFILE_UV = 'C:\\Users\\me\\.local\\bin\\uv.exe';
 const LOCALAPPDATA_UV = 'C:\\Users\\me\\AppData\\Local\\uv\\uv.exe';
+const MANAGED_UV =
+  'C:\\Users\\me\\AppData\\Local\\PaperLens\\translation-engine\\uv\\uv.exe';
 
 describe('buildCommandInvocation', () => {
   // Review Focus #4: a .cmd shim with spaces stays one executable argument.
@@ -89,7 +93,7 @@ describe('babeldocCandidates', () => {  it('已配置的路径排在第一位', 
     expect(candidates[0]).toBe('C:\\Tools\\babeldoc.cmd');
   });
 
-  it('按 where.exe、用户 bin、Python Scripts 的顺序返回存在的候选', () => {
+  it('按 where.exe、用户 bin、Python Scripts、托管目录的顺序返回存在的候选', () => {
     const candidates = babeldocCandidates({
       configuredPath: '',
       env: ENV,
@@ -98,7 +102,24 @@ describe('babeldocCandidates', () => {  it('已配置的路径排在第一位', 
       which: (command) => (command === 'babeldoc' ? [PATH_BABELDOC] : []),
     });
 
-    expect(candidates).toEqual([PATH_BABELDOC, PROFILE_BABELDOC, APPDATA_BABELDOC]);
+    expect(candidates).toEqual([
+      PATH_BABELDOC,
+      PROFILE_BABELDOC,
+      APPDATA_BABELDOC,
+      MANAGED_BABELDOC,
+    ]);
+  });
+
+  it('只有一键安装的托管 BabelDOC 时也能检测到', () => {
+    const candidates = babeldocCandidates({
+      configuredPath: '',
+      env: ENV,
+      platform: 'win32',
+      exists: (path) => path === MANAGED_BABELDOC,
+      which: () => [],
+    });
+
+    expect(candidates).toEqual([MANAGED_BABELDOC]);
   });
 
   it('过滤掉不存在的路径', () => {
@@ -135,12 +156,17 @@ describe('babeldocCandidates', () => {  it('已配置的路径排在第一位', 
       which: () => [PATH_BABELDOC],
     });
 
-    expect(candidates).toEqual([PATH_BABELDOC, PROFILE_BABELDOC, APPDATA_BABELDOC]);
+    expect(candidates).toEqual([
+      PATH_BABELDOC,
+      PROFILE_BABELDOC,
+      APPDATA_BABELDOC,
+      MANAGED_BABELDOC,
+    ]);
   });
 });
 
 describe('uvCandidates', () => {
-  it('按 where.exe uv、用户 bin、LOCALAPPDATA 的顺序返回存在的候选', () => {
+  it('按 where.exe uv、用户 bin、LOCALAPPDATA、托管目录的顺序返回存在的候选', () => {
     const candidates = uvCandidates({
       env: ENV,
       platform: 'win32',
@@ -148,7 +174,7 @@ describe('uvCandidates', () => {
       which: (command) => (command === 'uv' ? [PATH_UV] : []),
     });
 
-    expect(candidates).toEqual([PATH_UV, PROFILE_UV, LOCALAPPDATA_UV]);
+    expect(candidates).toEqual([PATH_UV, PROFILE_UV, LOCALAPPDATA_UV, MANAGED_UV]);
   });
 
   it('过滤掉不存在的 uv', () => {

@@ -1,5 +1,9 @@
-appId: com.paperlens.app
-productName: PaperLens
+appId: com.murphyereader.app
+productName: MurphyEReader
+# Reuse the Electron distribution installed by npm. Without this,
+# electron-builder re-downloads the same zip from GitHub on every package,
+# which fails on networks that cannot reach the release host.
+electronDist: node_modules/electron/dist
 directories:
   output: dist
   buildResources: build
@@ -17,5 +21,5 @@ win:
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  artifactName: PaperLens-${version}-setup.${ext}
+  artifactName: MurphyEReader-${version}-setup.${ext}
 npmRebuild: true

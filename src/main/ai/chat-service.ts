@@ -114,7 +114,7 @@ function prepareChat(
         question: req.question,
         selectionText: req.selectionText,
         currentPageNo: req.currentPageNo,
-        fullTextMode: req.fullTextMode,
+        contextMode: req.contextMode,
         budgetTokens: settings.tokenBudget,
       });
     });

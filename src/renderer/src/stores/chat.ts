@@ -1,5 +1,10 @@
 import { create } from 'zustand';
-import type { ChatMessage, ChatSendRequest, Conversation } from '@shared/types';
+import type {
+  ChatContextMode,
+  ChatMessage,
+  ChatSendRequest,
+  Conversation,
+} from '@shared/types';
 import { errorMessage } from '../lib/errors';
 
 export interface ChatSendArgs {
@@ -17,7 +22,7 @@ export interface ChatState {
   messages: ChatMessage[];
   streamingByRequest: Record<string, string>;
   error: string | null;
-  fullTextMode: boolean;
+  contextMode: ChatContextMode;
   /** Request whose deltas the panel currently shows; background ones keep running. */
   activeRequestId: string | null;
   /** Routes chat events (which only carry a request id) back to their conversation. */
@@ -35,7 +40,7 @@ export interface ChatState {
   /** Re-sends the stored failed request without appending a second optimistic question. */
   retryLast(): Promise<void>;
   abort(): Promise<void>;
-  setFullTextMode(v: boolean): void;
+  setContextMode(mode: ChatContextMode): void;
   requestFocus(): void;
 }
 
@@ -208,7 +213,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
     messages: [],
     streamingByRequest: {},
     error: null,
-    fullTextMode: false,
+    contextMode: 'page',
     activeRequestId: null,
     requestConversation: {},
     lastFailedSendArgs: null,
@@ -409,7 +414,7 @@ export const useChatStore = create<ChatState>()((set, get) => {
         paperId: req.paperId,
         conversationId,
         question,
-        fullTextMode: get().fullTextMode,
+        contextMode: get().contextMode,
       };
       if (req.selectionText !== undefined) {
         payload.selectionText = req.selectionText;
@@ -492,8 +497,8 @@ export const useChatStore = create<ChatState>()((set, get) => {
       }
     },
 
-    setFullTextMode(value) {
-      set({ fullTextMode: value });
+    setContextMode(mode) {
+      set({ contextMode: mode });
     },
 
     requestFocus() {

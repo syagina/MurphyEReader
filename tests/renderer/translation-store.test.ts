@@ -46,6 +46,7 @@ function makeJob(overrides: Partial<TranslationJobInfo> = {}): TranslationJobInf
     paperId: 7,
     title: '样本论文',
     status: 'running',
+    startedAt: 1_700_000_000_000,
     percent: null,
     line: '',
     logs: [],
@@ -115,7 +116,13 @@ function installApi(): Harness {
   const papers = {
     list: vi.fn(async (): Promise<Paper[]> => [makePaper()]),
     checkFiles: vi.fn(async () => [
-      { id: 7, originalExists: true, translatedExists: true },
+      {
+        id: 7,
+        originalExists: true,
+        translatedExists: true,
+        bilingualExists: false,
+        translatedIsBilingual: false,
+      },
     ]),
   };
   (window as unknown as { api: unknown }).api = { translation, papers };
@@ -130,6 +137,7 @@ beforeEach(() => {
     job: null,
     logs: [],
     collapsed: false,
+    hidden: false,
     donePaper: null,
   });
 });
@@ -174,6 +182,30 @@ describe('useTranslationStore.init', () => {
     expect(state.job?.line).toBe('第 120 行');
   });
 
+  it('心跳进度只更新当前行，不写入日志历史', async () => {
+    harness.cleanup = useTranslationStore.getState().init();
+    await useTranslationStore.getState().start(7);
+    harness.callbacks.progress?.({
+      jobId: 'job-1',
+      paperId: 7,
+      percent: 10,
+      line: 'BabelDOC 翻译进度：10%',
+    });
+
+    harness.callbacks.progress?.({
+      jobId: 'job-1',
+      paperId: 7,
+      percent: 10,
+      line: 'AI 已返回 8 段，等待返回 2 段…（已用时 30 秒）',
+      appendLog: false,
+    });
+
+    const state = useTranslationStore.getState();
+    expect(state.logs).toEqual(['BabelDOC 翻译进度：10%']);
+    expect(state.job?.line).toBe('AI 已返回 8 段，等待返回 2 段…（已用时 30 秒）');
+    expect(state.job?.percent).toBe(10);
+  });
+
   it('完成事件保存最新文献并刷新文献库', async () => {
     harness.cleanup = useTranslationStore.getState().init();
     await useTranslationStore.getState().start(7);
@@ -184,10 +216,30 @@ describe('useTranslationStore.init', () => {
     await vi.waitFor(() => {
       expect(useTranslationStore.getState().job?.status).toBe('done');
     });
+    expect(useTranslationStore.getState().job?.line).toBe('翻译完成');
     expect(useTranslationStore.getState().donePaper).toEqual(updated);
     await vi.waitFor(() => {
       expect((window.api.papers.list as ReturnType<typeof vi.fn>)).toHaveBeenCalled();
     });
+  });
+
+  it('完成事件带有补充说明时以它为完成行', async () => {
+    harness.cleanup = useTranslationStore.getState().init();
+    await useTranslationStore.getState().start(7);
+    const updated = makePaper({ pageCountTranslated: 3 });
+
+    harness.callbacks.done?.({
+      jobId: 'job-1',
+      paper: updated,
+      message: '翻译完成（已改用双语对照版，避免内容遗漏）',
+    });
+
+    await vi.waitFor(() => {
+      expect(useTranslationStore.getState().job?.status).toBe('done');
+    });
+    expect(useTranslationStore.getState().job?.line).toBe(
+      '翻译完成（已改用双语对照版，避免内容遗漏）',
+    );
   });
 
   it('失败与取消事件分别记录状态，dismiss 清空终态', async () => {
@@ -224,6 +276,35 @@ describe('useTranslationStore.start', () => {
     });
     await useTranslationStore.getState().cancel();
     expect(harness.api.cancel).toHaveBeenCalledWith('job-1');
+  });
+
+  it('关闭窗口只隐藏卡片，任务继续；show 重新显示', async () => {
+    harness.cleanup = useTranslationStore.getState().init();
+    await useTranslationStore.getState().start(7);
+
+    useTranslationStore.getState().hide();
+    expect(useTranslationStore.getState().hidden).toBe(true);
+    expect(useTranslationStore.getState().job?.status).toBe('running');
+    expect(harness.api.cancel).not.toHaveBeenCalled();
+
+    useTranslationStore.getState().show();
+    expect(useTranslationStore.getState().hidden).toBe(false);
+    expect(useTranslationStore.getState().job?.status).toBe('running');
+  });
+
+  it('新任务会自动重新打开此前隐藏的窗口', async () => {
+    harness.cleanup = useTranslationStore.getState().init();
+    await useTranslationStore.getState().start(7);
+    useTranslationStore.getState().hide();
+
+    await useTranslationStore.getState().start(7);
+
+    expect(useTranslationStore.getState().hidden).toBe(false);
+  });
+
+  it('没有任务时 hide 不做任何事', () => {
+    useTranslationStore.getState().hide();
+    expect(useTranslationStore.getState().hidden).toBe(false);
   });
 
   it('把 Electron 前缀剥离后按固定消息重新抛出', async () => {

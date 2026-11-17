@@ -339,12 +339,12 @@ export async function buildNotesDocx(
     children.push(...(await blockParagraphs(docx, block, getFormula)));
   }
 
-  const documentTitle = title.trim() === '' ? 'PaperLens 笔记' : title;
+  const documentTitle = title.trim() === '' ? 'MurphyEReader 笔记' : title;
   const doc = new docx.Document({
     title: documentTitle,
-    creator: 'PaperLens',
-    lastModifiedBy: 'PaperLens',
-    description: '由 PaperLens 导出的文献笔记',
+    creator: 'MurphyEReader',
+    lastModifiedBy: 'MurphyEReader',
+    description: '由 MurphyEReader 导出的文献笔记',
     features: { updateFields: true },
     styles: {
       default: {

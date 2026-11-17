@@ -13,6 +13,8 @@ export interface SelectionTranslationCardProps {
   onRetry(): void;
   onClose(): void;
   onOpenSettings?(): void;
+  /** Saves the finished translation as a sticky note. */
+  onSaveSticky?(): void;
 }
 
 /**
@@ -32,6 +34,7 @@ export function SelectionTranslationCard({
   onRetry,
   onClose,
   onOpenSettings,
+  onSaveSticky,
 }: SelectionTranslationCardProps): React.JSX.Element {
   const [copyFailed, setCopyFailed] = useState(false);
 
@@ -59,15 +62,17 @@ export function SelectionTranslationCard({
           重试
         </button>
       )}
-      {!loading && !unconfigured && error === null && (
-        <button
-          type="button"
-          className="menu-button"
-          disabled={translation === null}
-          onClick={handleCopy}
-        >
-          复制
-        </button>
+      {!loading && !unconfigured && error === null && translation !== null && (
+        <>
+          <button type="button" className="menu-button" onClick={handleCopy}>
+            复制
+          </button>
+          {onSaveSticky !== undefined && (
+            <button type="button" className="menu-button" onClick={onSaveSticky}>
+              存为标注
+            </button>
+          )}
+        </>
       )}
       <button type="button" className="menu-button" onClick={onClose}>
         关闭

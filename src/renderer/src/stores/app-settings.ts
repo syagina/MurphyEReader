@@ -12,7 +12,7 @@ export interface AppSettingsState {
 
 /**
  * Renderer-side view of the generic application settings (library root,
- * BabelDOC path, AI panel width). Failures stay on the store so a settings tab
+ * BabelDOC path, AI panel width, theme). Failures stay on the store so a settings tab
  * can show them; `save` also rethrows so a form can keep its draft open.
  */
 export const useAppSettingsStore = create<AppSettingsState>()((set) => ({

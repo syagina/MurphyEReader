@@ -1,7 +1,25 @@
 node_modules/
 out/
 dist/
+dist-next/
+dist-review/
+.superpowers/
 *.log
 .DS_Store
 tests/fixtures/*.pdf
 tests/fixtures/*.tmp
+
+# Local secrets and data
+.env
+.env.*
+*.pem
+*.key
+*.p12
+*.db
+*.sqlite
+*.sqlite3
+
+# Local scratch directories
+tmp/
+.tmp-*/
+coverage/

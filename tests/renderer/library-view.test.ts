@@ -7,6 +7,7 @@ import {
   filterAndSortPapers,
   isPaperMissing,
   libraryStats,
+  missingKind,
   readingProgress,
 } from '@renderer/lib/library-view';
 
@@ -209,9 +210,30 @@ describe('library helpers', () => {
     expect(isPaperMissing(papers[0], statuses[1])).toBe(false);
     expect(isPaperMissing(papers[1], statuses[2])).toBe(true);
     expect(isPaperMissing(papers[2], undefined)).toBe(false);
+    expect(missingKind(papers[1], statuses[2])).toBe('original');
+    expect(missingKind(papers[0], statuses[1])).toBeNull();
+    expect(missingKind(papers[2], undefined)).toBeNull();
     expect(readingProgress(papers[0])).toBe(50);
     expect(readingProgress(makePaper({ lastPageOriginal: 200 }))).toBe(100);
     expect(readingProgress(makePaper({ pageCountOriginal: 0 }))).toBe(0);
+  });
+
+  it('区分原文缺失与译本缺失', () => {
+    const bound = makePaper({
+      id: 4,
+      filePathOriginal: 'C:/papers/bound.pdf',
+      filePathTranslated: 'C:/papers/bound-zh.pdf',
+    });
+
+    expect(
+      missingKind(bound, { originalExists: true, translatedExists: false }),
+    ).toBe('translation');
+    expect(
+      missingKind(bound, { originalExists: false, translatedExists: true }),
+    ).toBe('original');
+    expect(
+      missingKind(bound, { originalExists: true, translatedExists: true }),
+    ).toBeNull();
   });
 
   it('汇总标签并统计文献状态', () => {

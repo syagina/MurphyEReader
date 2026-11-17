@@ -1,11 +1,12 @@
 {
-  "name": "paperlens",
-  "version": "0.1.0",
-  "description": "PaperLens - an AI-powered desktop PDF reader",
-  "author": "PaperLens",
+  "name": "murphyereader",
+  "version": "1.0.0",
+  "description": "MurphyEReader - an AI-powered desktop PDF reader",
+  "author": "syagina",
+  "productName": "MurphyEReader",
   "main": "./out/main/index.js",
   "private": true,
-  "license": "MIT",
+  "license": "UNLICENSED",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
@@ -19,6 +20,7 @@
     "docx": "^9.15.4",
     "html-to-image": "^1.11.13",
     "katex": "^0.16.47",
+    "pdf-lib": "^1.17.1",
     "pdfjs-dist": "^6.5.438",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
@@ -38,7 +40,6 @@
     "electron-builder": "^26.18.0",
     "electron-vite": "^6.0.0",
     "jsdom": "^31.0.1",
-    "pdf-lib": "^1.17.1",
     "typescript": "^5.9.3",
     "vite": "^8.3.8",
     "vitest": "^5.1.0"

@@ -14,7 +14,17 @@ import type {
   LegacyMigrationSummary,
   NoteType,
   PaperUpdatePatch,
+  PdfVersion,
+  StickyNoteExportResult,
 } from '@shared/types';
+import {
+  PDF_VERSION_LABELS,
+  isPdfVersion,
+  validateStickyNoteCreateInput,
+  validateStickyNoteUpdatePatch,
+} from '@shared/sticky-notes';
+import { DEEPSEEK_API_KEY_URL } from '@shared/ai-providers';
+import { sanitizeFileNamePart } from '@shared/file-name';
 import { abortChat, startChat } from '../ai/chat-service';
 import { AiClient } from '../ai/client';
 import type { AiConfig } from '../ai/client';
@@ -31,12 +41,27 @@ import { createFolder, getFolder, listFolders, removeFolder, renameFolder } from
 import { createNote, deleteNote, listNotes, updateNote } from '../db/notes';
 import { getPaper, listPapers, markRead, updatePaper } from '../db/papers';
 import { searchGlobal } from '../db/search';
+import {
+  clearPageDrawings,
+  createStickyNote,
+  deleteStickyNote,
+  listStickyNotes,
+  updateStickyNote,
+} from '../db/sticky-notes';
 import { prepareExportDefaultPath } from '../export/default-path';
 import { ensureFileExtension } from '../export/file-path';
+import {
+  assertNotManagedPdfTarget,
+  buildAnnotatedPdf,
+} from '../export/sticky-notes-pdf';
 import { PdfExporter } from '../export/pdf-exporter';
 import { JobRegistry } from '../jobs/job-registry';
 import { getApiKey, getSettings, setSettings } from '../settings';
-import { getStoredAppSettings, setStoredAppSettings } from '../settings/app-settings';
+import {
+  ensureOnboardedForExistingLibrary,
+  getStoredAppSettings,
+  setStoredAppSettings,
+} from '../settings/app-settings';
 import type { SecretStore } from '../settings/secret-store';
 import { migrateLegacyPapers } from '../storage/legacy-migration';
 import { PaperLibrary } from '../storage/library-service';
@@ -46,6 +71,8 @@ import { readStorageInfo } from '../storage/storage-info';
 import { BabeldocService } from '../tools/babeldoc-service';
 import { ToolJobRunner } from '../tools/job-runner';
 import { PaperTranslationService } from '../translation/paper-translation';
+import { repairManagedTranslation } from '../translation/repair-binding';
+import { translationVariantPaths } from '../translation/translation-variants';
 
 export interface HandlerDeps {
   db: Database.Database;
@@ -78,23 +105,37 @@ type NoteGenerateParams = {
 export function resolvePaperPath(
   db: Database.Database,
   paperId: number,
-  version: 'original' | 'translated',
+  version: PdfVersion,
 ): string {
   const paper = getPaper(db, paperId);
   if (paper === null) {
     throw new Error(`文献不存在: ${paperId}`);
   }
+  if (version === 'original') {
+    return paper.filePathOriginal;
+  }
+  if (paper.filePathTranslated === null || paper.filePathTranslated === '') {
+    throw new Error('未绑定译本');
+  }
   if (version === 'translated') {
-    if (paper.filePathTranslated === null || paper.filePathTranslated === '') {
-      throw new Error('未绑定译本');
-    }
     return paper.filePathTranslated;
   }
-  return paper.filePathOriginal;
+  const bilingual = translationVariantPaths(paper).bilingual;
+  if (bilingual === null || !existsSync(bilingual)) {
+    throw new Error('未绑定中英对照译本');
+  }
+  return bilingual;
 }
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function requireStickyNoteId(value: unknown): number {
+  if (typeof value !== 'number' || !Number.isInteger(value) || value <= 0) {
+    throw new Error('标注 ID 无效');
+  }
+  return value;
 }
 
 const EXPORT_CONTEXT_ERROR = '导出参数无效';
@@ -289,6 +330,14 @@ export function registerIpcHandlers(deps: HandlerDeps): {
     getRoot: libraryRoot,
     getEnginePath: () => babeldoc.detect(),
     getAiConfig: readAiConfig,
+    getTranslationOptions: () => {
+      const settings = getStoredAppSettings(db, deps.documentsDir);
+      return {
+        qps: settings.translationQps,
+        workers: settings.translationWorkers,
+        autoExtractGlossary: settings.translationAutoGlossary,
+      };
+    },
     emit,
   });
 
@@ -347,20 +396,26 @@ export function registerIpcHandlers(deps: HandlerDeps): {
 
   electron.ipcMain.handle(
     'papers:markRead',
-    (_event, id: number, version: 'original' | 'translated', pageNo: number) => {
+    (_event, id: number, version: PdfVersion, pageNo: number) => {
       markRead(db, id, version, pageNo);
     },
   );
 
   electron.ipcMain.handle('papers:checkFiles', () =>
-    listPapers(db).map((paper) => ({
-      id: paper.id,
-      originalExists: paper.filePathOriginal !== '' && existsSync(paper.filePathOriginal),
-      translatedExists:
-        paper.filePathTranslated !== null &&
-        paper.filePathTranslated !== '' &&
-        existsSync(paper.filePathTranslated),
-    })),
+    listPapers(db).map((paper) => {
+      const primary = paper.filePathTranslated;
+      const variants = translationVariantPaths(paper);
+      return {
+        id: paper.id,
+        originalExists: paper.filePathOriginal !== '' && existsSync(paper.filePathOriginal),
+        translatedExists:
+          primary !== null && primary !== '' && existsSync(primary),
+        bilingualExists:
+          variants.bilingual !== null && existsSync(variants.bilingual),
+        translatedIsBilingual:
+          primary !== null && primary !== '' && variants.translated === null,
+      };
+    }),
   );
 
   electron.ipcMain.handle(
@@ -376,8 +431,30 @@ export function registerIpcHandlers(deps: HandlerDeps): {
 
   electron.ipcMain.handle(
     'pdf:load',
-    async (_event, paperId: number, version: 'original' | 'translated') =>
-      toLoadPayload(resolvePaperPath(db, paperId, version)),
+    async (_event, paperId: number, version: PdfVersion) => {
+      // An old BabelDOC mono output may have dropped pages. Loading the
+      // translated view is the first moment the app needs that file, so check
+      // once and silently rebind the complete sibling dual output. Repair is
+      // best effort and must never block opening the PDF.
+      let repaired = false;
+      if (version === 'translated') {
+        try {
+          repaired = await repairManagedTranslation(db, paperId, libraryRoot());
+        } catch {
+          repaired = false;
+        }
+      }
+      const payload = await toLoadPayload(resolvePaperPath(db, paperId, version));
+      if (!repaired) {
+        return payload;
+      }
+      const paper = getPaper(db, paperId);
+      return {
+        ...payload,
+        repaired: true,
+        pageCountTranslated: paper?.pageCountTranslated ?? undefined,
+      };
+    },
   );
 
   electron.ipcMain.handle('conversations:list', (_event, paperId: number) =>
@@ -483,6 +560,124 @@ export function registerIpcHandlers(deps: HandlerDeps): {
       generateNote({ db, ai, getSettings: () => getSettings(db, secret) }, kind, params),
   );
 
+  electron.ipcMain.handle(
+    'stickyNotes:list',
+    (_event, paperId: unknown, version: unknown) => {
+      if (
+        typeof paperId !== 'number' ||
+        !Number.isInteger(paperId) ||
+        paperId <= 0
+      ) {
+        throw new Error('标注的文献 ID 无效');
+      }
+      if (!isPdfVersion(version)) {
+        throw new Error('标注的 PDF 版本无效');
+      }
+      return listStickyNotes(db, paperId, version);
+    },
+  );
+
+  electron.ipcMain.handle('stickyNotes:create', (_event, input: unknown) => {
+    const validated = validateStickyNoteCreateInput(input);
+    if (getPaper(db, validated.paperId) === null) {
+      throw new Error(`文献不存在: ${validated.paperId}`);
+    }
+    return createStickyNote(db, validated);
+  });
+
+  electron.ipcMain.handle(
+    'stickyNotes:update',
+    (_event, id: unknown, patch: unknown) => {
+      const noteId = requireStickyNoteId(id);
+      return updateStickyNote(db, noteId, validateStickyNoteUpdatePatch(patch));
+    },
+  );
+
+  electron.ipcMain.handle('stickyNotes:remove', (_event, id: unknown) => {
+    deleteStickyNote(db, requireStickyNoteId(id));
+  });
+
+  electron.ipcMain.handle(
+    'stickyNotes:clearPageDrawings',
+    (_event, paperId: unknown, version: unknown, pageNo: unknown) => {
+      if (
+        typeof paperId !== 'number' ||
+        !Number.isInteger(paperId) ||
+        paperId <= 0
+      ) {
+        throw new Error('标注的文献 ID 无效');
+      }
+      if (!isPdfVersion(version)) {
+        throw new Error('标注的 PDF 版本无效');
+      }
+      if (
+        typeof pageNo !== 'number' ||
+        !Number.isInteger(pageNo) ||
+        pageNo <= 0
+      ) {
+        throw new Error('标注的页码无效');
+      }
+      if (getPaper(db, paperId) === null) {
+        throw new Error(`文献不存在: ${paperId}`);
+      }
+      return clearPageDrawings(db, paperId, version, pageNo);
+    },
+  );
+
+  electron.ipcMain.handle(
+    'stickyNotes:exportPdf',
+    async (
+      _event,
+      paperId: unknown,
+      version: unknown,
+    ): Promise<StickyNoteExportResult | null> => {
+      if (
+        typeof paperId !== 'number' ||
+        !Number.isInteger(paperId) ||
+        paperId <= 0
+      ) {
+        throw new Error('标注的文献 ID 无效');
+      }
+      if (!isPdfVersion(version)) {
+        throw new Error('标注的 PDF 版本无效');
+      }
+      const sourcePath = resolvePaperPath(db, paperId, version);
+      const notes = listStickyNotes(db, paperId, version);
+      if (notes.length === 0) {
+        throw new Error('当前版本没有可导出的标注');
+      }
+      const paper = getPaper(db, paperId);
+      if (paper === null) {
+        throw new Error(`文献不存在: ${paperId}`);
+      }
+
+      const source = await readFile(sourcePath);
+      const { bytes, exported, skipped } = await buildAnnotatedPdf(source, notes);
+
+      const suggestedName = `《${sanitizeFileNamePart(paper.title, '文献')}》-标注-${PDF_VERSION_LABELS[version]}.pdf`;
+      const defaultPath = await exportDefaultPath(suggestedName, {
+        scope: 'note',
+        paperId,
+      });
+      const result = await electron.dialog.showSaveDialog({
+        defaultPath,
+        filters: [{ name: 'PDF 文档', extensions: ['pdf'] }],
+      });
+      if (result.canceled || !result.filePath) {
+        return null;
+      }
+
+      const target = ensureFileExtension(result.filePath, '.pdf');
+      assertNotManagedPdfTarget(target, [
+        paper.filePathOriginal,
+        paper.filePathTranslated,
+        translationVariantPaths(paper).bilingual,
+      ]);
+      await writeFile(target, Buffer.from(bytes));
+      return { filePath: target, exported, skipped };
+    },
+  );
+
   electron.ipcMain.handle('search:global', (_event, query: string) => searchGlobal(db, query));
 
   electron.ipcMain.handle(
@@ -560,7 +755,7 @@ export function registerIpcHandlers(deps: HandlerDeps): {
       }
       const target = ensureFileExtension(result.filePath, '.pdf');
       const pdf = await pdfExporter.render({
-        title: title.trim() === '' ? 'PaperLens 笔记' : title,
+        title: title.trim() === '' ? 'MurphyEReader 笔记' : title,
         markdown,
       });
       await writeFile(target, pdf);
@@ -609,6 +804,11 @@ export function registerIpcHandlers(deps: HandlerDeps): {
       temperature: input.temperature,
     }));
     return client.testConnection();
+  });
+
+  // Dedicated constant-URL link: the renderer cannot pass an arbitrary target.
+  electron.ipcMain.handle('settings:openDeepSeekConsole', async () => {
+    await electron.shell.openExternal(DEEPSEEK_API_KEY_URL);
   });
 
   electron.ipcMain.handle('storage:getInfo', () =>
@@ -683,6 +883,11 @@ export function registerIpcHandlers(deps: HandlerDeps): {
   });
 
   electron.ipcMain.handle('appSettings:get', () => readAppSettings());
+
+  // Lightweight startup check: only SQLite, never BabelDOC's slow probe.
+  electron.ipcMain.handle('appSettings:getOnboarding', () => ({
+    onboarded: ensureOnboardedForExistingLibrary(db),
+  }));
 
   electron.ipcMain.handle('appSettings:update', async (_event, patch: AppSettingsUpdate) => {
     // A custom engine path must run before it is stored; clearing stays free.

@@ -4,6 +4,18 @@ import { join } from 'path';
 import { openDb } from './db';
 import { registerIpcHandlers } from './ipc/handlers';
 import { createSafeStorageSecretStore } from './settings/secret-store';
+import { legacyUserDataDir } from './settings/legacy-user-data';
+
+// The app used to store its data under the pre-rename folder. Keep using that
+// folder when it is the only one with a database, so the rename does not open
+// an empty library. Must run before the first window is created.
+const legacyUserData = legacyUserDataDir(
+  app.getPath('userData'),
+  app.getPath('appData'),
+);
+if (legacyUserData !== null) {
+  app.setPath('userData', legacyUserData);
+}
 
 let mainWindow: BrowserWindow | null = null;
 let db: Database.Database | null = null;

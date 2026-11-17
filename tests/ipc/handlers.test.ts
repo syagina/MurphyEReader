@@ -89,6 +89,58 @@ describe('resolvePaperPath', () => {
     expect(() => resolvePaperPath(db, paper.id, 'translated')).toThrow(new Error('未绑定译本'));
   });
 
+  it('译文为中英对照主绑定时原样返回', () => {
+    const dualPath = join(tempDir, 'translated.zh-CN.dual.pdf');
+    writeFileSync(dualPath, 'pdf');
+    const paper = createPaper(
+      db,
+      makeInput({ filePathTranslated: dualPath, pageCountTranslated: 130 }),
+    );
+
+    expect(resolvePaperPath(db, paper.id, 'translated')).toBe(dualPath);
+    expect(resolvePaperPath(db, paper.id, 'bilingual')).toBe(dualPath);
+  });
+
+  it('仅译文主绑定时 bilingual 返回同目录的对照版', () => {
+    const monoPath = join(tempDir, 'translated.zh-CN.mono.pdf');
+    const dualPath = join(tempDir, 'translated.zh-CN.dual.pdf');
+    writeFileSync(monoPath, 'pdf');
+    writeFileSync(dualPath, 'pdf');
+    const paper = createPaper(
+      db,
+      makeInput({ filePathTranslated: monoPath, pageCountTranslated: 130 }),
+    );
+
+    expect(resolvePaperPath(db, paper.id, 'translated')).toBe(monoPath);
+    expect(resolvePaperPath(db, paper.id, 'bilingual')).toBe(dualPath);
+  });
+
+  it('对照版文件缺失时 bilingual 报 未绑定中英对照译本', () => {
+    const monoPath = join(tempDir, 'translated.zh-CN.mono.pdf');
+    writeFileSync(monoPath, 'pdf');
+    const paper = createPaper(
+      db,
+      makeInput({ filePathTranslated: monoPath, pageCountTranslated: 130 }),
+    );
+
+    expect(() => resolvePaperPath(db, paper.id, 'bilingual')).toThrow(
+      new Error('未绑定中英对照译本'),
+    );
+  });
+
+  it('自定义译本没有对照版，bilingual 报未绑定', () => {
+    const customPath = join(tempDir, 'custom-zh.pdf');
+    writeFileSync(customPath, 'pdf');
+    const paper = createPaper(
+      db,
+      makeInput({ filePathTranslated: customPath, pageCountTranslated: 130 }),
+    );
+
+    expect(() => resolvePaperPath(db, paper.id, 'bilingual')).toThrow(
+      new Error('未绑定中英对照译本'),
+    );
+  });
+
   it('论文不存在时抛出 文献不存在', () => {
     expect(() => resolvePaperPath(db, 999, 'original')).toThrow(new Error('文献不存在: 999'));
   });

@@ -23,7 +23,7 @@ afterEach(() => {
 describe('readStorageInfo', () => {
   it('根目录可写时返回根路径、默认路径并创建目录结构', async () => {
     const info = await readStorageInfo(db, tempDir, null, null);
-    const expectedRoot = join(tempDir, 'PaperLens');
+    const expectedRoot = join(tempDir, 'MurphyEReader');
 
     expect(info).toEqual({
       root: expectedRoot,
@@ -44,13 +44,13 @@ describe('readStorageInfo', () => {
     const info = await readStorageInfo(db, tempDir, null, null);
 
     expect(info.root).toBe(custom);
-    expect(info.defaultRoot).toBe(join(tempDir, 'PaperLens'));
+    expect(info.defaultRoot).toBe(join(tempDir, 'MurphyEReader'));
     expect(info.writable).toBe(true);
     expect(info.error).toBeNull();
   });
 
   it('根目录被同名文件占据时返回 writable:false 与中文错误且不抛出', async () => {
-    const blocked = join(tempDir, 'PaperLens');
+    const blocked = join(tempDir, 'MurphyEReader');
     writeFileSync(blocked, 'not a directory');
 
     const info = await readStorageInfo(db, tempDir, null, null);

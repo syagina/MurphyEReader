@@ -6,8 +6,18 @@ import { describe, expect, it, vi } from 'vitest';
 import { JobRegistry } from '@main/jobs/job-registry';
 import type { StoredAppSettings } from '@main/settings/app-settings';
 import { BabeldocService } from '@main/tools/babeldoc-service';
+import type {
+  BabeldocInstallOutcome,
+  BabeldocInstallPlan,
+  BabeldocInstaller,
+} from '@main/tools/babeldoc-installer';
 import type { ToolJobRunner } from '@main/tools/job-runner';
-import type { ToolDoneEvent, ToolRunOptions, ToolRunResult } from '@shared/types';
+import type {
+  ToolDoneEvent,
+  ToolProgressEvent,
+  ToolRunOptions,
+  ToolRunResult,
+} from '@shared/types';
 
 const BUSY = '请先等待当前任务完成';
 const INVALID_ENGINE = '无法运行该翻译引擎，请重新选择';
@@ -21,6 +31,16 @@ const ENV = {
 
 const PATH_BABELDOC = 'C:\\PATH\\babeldoc.exe';
 const UV_PATH = 'C:\\Users\\me\\.local\\bin\\uv.exe';
+const MANAGED_ROOT = 'C:\\Users\\me\\AppData\\Local\\PaperLens\\translation-engine';
+const MANAGED_BABELDOC = `${MANAGED_ROOT}\\bin\\babeldoc.exe`;
+const MANAGED_LOG = `${MANAGED_ROOT}\\install.log`;
+const MANAGED_RESULT = `${MANAGED_ROOT}\\install-result.json`;
+const SCRIPT_PATH = 'C:\\Temp\\paperlens-babeldoc-install-job\\install.ps1';
+
+const POWERSHELL_COMMAND = {
+  file: 'powershell.exe',
+  args: ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', SCRIPT_PATH],
+};
 
 const OK_RESULT: ToolRunResult = {
   code: 0,
@@ -30,8 +50,38 @@ const OK_RESULT: ToolRunResult = {
   timedOut: false,
 };
 
+const SUCCESS_OUTCOME: BabeldocInstallOutcome = {
+  ok: true,
+  canceled: false,
+  babeldocPath: MANAGED_BABELDOC,
+  message: '安装完成',
+};
+
+function managedPlan(logPath = MANAGED_LOG): BabeldocInstallPlan {
+  return {
+    paths: {
+      installRoot: MANAGED_ROOT,
+      uvDir: `${MANAGED_ROOT}\\uv`,
+      uvPath: `${MANAGED_ROOT}\\uv\\uv.exe`,
+      toolDir: `${MANAGED_ROOT}\\tool`,
+      binDir: `${MANAGED_ROOT}\\bin`,
+      pythonDir: `${MANAGED_ROOT}\\python`,
+      cacheDir: `${MANAGED_ROOT}\\cache`,
+      babeldocPath: MANAGED_BABELDOC,
+      logPath,
+      resultPath: MANAGED_RESULT,
+      scriptPath: SCRIPT_PATH,
+      configPath: 'C:\\Temp\\paperlens-babeldoc-install-job\\install-config.json',
+    },
+    command: POWERSHELL_COMMAND,
+  };
+}
+
 interface HarnessOptions {
   babeldocPath?: string;
+  platform?: NodeJS.Platform;
+  outcome?: BabeldocInstallOutcome | null;
+  installer?: Pick<BabeldocInstaller, 'prepare' | 'readOutcome'>;
   exists?: (path: string) => boolean;
   which?: (command: string) => string[];
   probe?: (path: string) => Promise<boolean>;
@@ -46,6 +96,12 @@ function createHarness(options: HarnessOptions = {}) {
     defaultLibraryRoot: 'C:/Documents/PaperLens',
     babeldocPath: options.babeldocPath ?? '',
     aiPanelWidth: 360,
+    theme: 'light',
+    paperTexture: 45,
+    translationQps: 8,
+    translationWorkers: 8,
+    translationAutoGlossary: true,
+    onboarded: false,
   };
   const jobs = new JobRegistry();
   const bus = new EventEmitter();
@@ -58,6 +114,13 @@ function createHarness(options: HarnessOptions = {}) {
     cancelAll: vi.fn(),
     activeJobIds: vi.fn(() => []),
   } as unknown as ToolJobRunner;
+  const prepare = vi.fn(
+    (_jobId: string, _uvPath: string | null): BabeldocInstallPlan => managedPlan(),
+  );
+  const readOutcome = vi.fn(
+    (): BabeldocInstallOutcome | null => options.outcome ?? null,
+  );
+  const installer = options.installer ?? { prepare, readOutcome };
   const setBabeldocPath = vi.fn((path: string) => {
     stored.babeldocPath = path;
   });
@@ -70,8 +133,9 @@ function createHarness(options: HarnessOptions = {}) {
     },
     getStored: () => stored,
     setBabeldocPath,
+    installer,
     env: ENV,
-    platform: 'win32',
+    platform: options.platform ?? 'win32',
     exists: options.exists ?? (() => false),
     which: options.which ?? (() => []),
     ...(options.defaultProbe === true
@@ -83,9 +147,11 @@ function createHarness(options: HarnessOptions = {}) {
   return {
     service,
     jobs,
+    bus,
     events,
     run,
     cancel,
+    prepare,
     setBabeldocPath,
     stored,
     waitForDone,
@@ -97,8 +163,55 @@ function isChineseMessage(message: string | null): boolean {
 }
 
 describe('BabeldocService.install', () => {
-  it('没有 uv 时返回安装说明且不启动进程', async () => {
-    const harness = createHarness();
+  it('Windows 没有 uv 也启动一键安装，并标记为不可取消', async () => {
+    const harness = createHarness({ outcome: SUCCESS_OUTCOME });
+    const done = harness.waitForDone();
+
+    const result = await harness.service.install();
+
+    expect(result).toEqual({
+      started: true,
+      jobId: expect.any(String),
+      instructions: null,
+      cancelable: false,
+    });
+    expect(harness.prepare).toHaveBeenCalledWith(result.jobId, null);
+    expect(harness.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        jobId: result.jobId,
+        kind: 'install',
+        command: POWERSHELL_COMMAND,
+      }),
+    );
+    await expect(done).resolves.toEqual({
+      jobId: result.jobId,
+      kind: 'install',
+      ok: true,
+      canceled: false,
+      message: null,
+    });
+    expect(harness.setBabeldocPath).toHaveBeenCalledWith(MANAGED_BABELDOC);
+    expect(harness.jobs.getState().toolTask).toBeNull();
+  });
+
+  it('Windows 已安装 uv 时把它交给一键安装器而不是直接运行 uv', async () => {
+    const harness = createHarness({
+      exists: (path) => path === UV_PATH,
+      outcome: SUCCESS_OUTCOME,
+    });
+    const done = harness.waitForDone();
+
+    const result = await harness.service.install();
+
+    expect(harness.prepare).toHaveBeenCalledWith(result.jobId, UV_PATH);
+    expect(harness.run).toHaveBeenCalledWith(
+      expect.objectContaining({ command: POWERSHELL_COMMAND }),
+    );
+    await done;
+  });
+
+  it('非 Windows 没有 uv 时仍返回手动安装说明且不启动进程', async () => {
+    const harness = createHarness({ platform: 'linux' });
 
     const result = await harness.service.install();
 
@@ -114,60 +227,119 @@ describe('BabeldocService.install', () => {
     expect(instructions).toContain('uv tool install --python 3.12 BabelDOC');
     expect(instructions).toContain('babeldoc --warmup');
     expect(harness.run).not.toHaveBeenCalled();
+    expect(harness.prepare).not.toHaveBeenCalled();
     expect(harness.jobs.getState().toolTask).toBeNull();
   });
 
-  it('找到 uv 时异步启动安装、释放租约并发出 tool:done', async () => {
-    const harness = createHarness({ exists: (path) => path === UV_PATH });
-    const done = harness.waitForDone();
-
-    const result = await harness.service.install();
-
-    expect(result.started).toBe(true);
-    expect(result.jobId).toEqual(expect.any(String));
-    expect(result.instructions).toBeNull();
-
-    await expect(done).resolves.toEqual({
-      jobId: result.jobId,
-      kind: 'install',
-      ok: true,
-      canceled: false,
-      message: null,
-    });
-    expect(harness.run).toHaveBeenCalledWith(
-      expect.objectContaining({
-        jobId: result.jobId,
-        kind: 'install',
-        command: {
-          file: UV_PATH,
-          args: ['tool', 'install', '--python', '3.12', 'BabelDOC'],
-        },
-      }),
-    );
-    expect(harness.jobs.getState().toolTask).toBeNull();
-  });
-
-  it('安装进程非零退出时发出失败结果并保留中文消息', async () => {
+  it('安装脚本报告失败时发出失败结果且不保存路径', async () => {
     const harness = createHarness({
-      exists: (path) => path === UV_PATH,
-      run: async () => ({ ...OK_RESULT, code: 1 }),
+      outcome: {
+        ok: false,
+        canceled: false,
+        babeldocPath: null,
+        message: '安装失败：所有安装源均未能完成安装',
+      },
+      run: async () => ({ ...OK_RESULT, code: 3 }),
     });
     const done = harness.waitForDone();
 
     await harness.service.install();
     const event = await done;
 
-    expect(event.ok).toBe(false);
-    expect(event.canceled).toBe(false);
-    expect(isChineseMessage(event.message)).toBe(true);
+    expect(event).toMatchObject({
+      kind: 'install',
+      ok: false,
+      canceled: false,
+      message: '安装失败：所有安装源均未能完成安装',
+    });
+    expect(harness.setBabeldocPath).not.toHaveBeenCalled();
     expect(harness.jobs.getState().toolTask).toBeNull();
+  });
+
+  it('用户取消管理员授权时发出取消结果', async () => {
+    const harness = createHarness({
+      outcome: {
+        ok: false,
+        canceled: true,
+        babeldocPath: null,
+        message: '已取消管理员授权，安装未开始',
+      },
+      run: async () => ({ ...OK_RESULT, code: 2 }),
+    });
+    const done = harness.waitForDone();
+
+    await harness.service.install();
+    const event = await done;
+
+    expect(event).toMatchObject({
+      kind: 'install',
+      ok: false,
+      canceled: true,
+      message: '已取消',
+    });
+  });
+
+  it('一键安装进行中拒绝取消，避免提权子进程继续安装', async () => {
+    let finishRun: ((result: ToolRunResult) => void) | null = null;
+    const harness = createHarness({
+      outcome: SUCCESS_OUTCOME,
+      run: () =>
+        new Promise<ToolRunResult>((resolve) => {
+          finishRun = resolve;
+        }),
+    });
+    const done = harness.waitForDone();
+
+    const result = await harness.service.install();
+    expect(result.jobId).not.toBeNull();
+    expect(harness.service.cancel(result.jobId ?? '')).toBe(false);
+    expect(harness.cancel).not.toHaveBeenCalled();
+
+    finishRun?.(OK_RESULT);
+    await done;
+  });
+
+  it('轮询安装日志，把新行推送给设置页', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'paperlens-install-log-'));
+    const logPath = join(dir, 'install.log');
+    const plan = managedPlan(logPath);
+    const installer = {
+      prepare: vi.fn(() => plan),
+      readOutcome: vi.fn(() => SUCCESS_OUTCOME),
+    };
+    const harness = createHarness({
+      installer,
+      run: async () => {
+        writeFileSync(
+          logPath,
+          `\uFEFF[10:00:00] 正在下载 uv\n[10:00:01] 正在安装 BabelDOC\n`,
+          'utf8',
+        );
+        await new Promise((resolve) => setTimeout(resolve, 450));
+        return OK_RESULT;
+      },
+    });
+    const done = harness.waitForDone();
+
+    await harness.service.install();
+    await done;
+
+    const progress = harness.events
+      .filter((event) => event.channel === 'tool:progress')
+      .map((event) => event.payload as ToolProgressEvent);
+    expect(progress.some((event) => event.line.includes('正在下载 uv'))).toBe(true);
+    expect(progress.some((event) => event.line.includes('正在安装 BabelDOC'))).toBe(
+      true,
+    );
+    expect(progress.every((event) => event.kind === 'install')).toBe(true);
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it('runner.run 拒绝时转为失败事件而不是未处理的拒绝', async () => {
     const harness = createHarness({
       exists: (path) => path === UV_PATH,
       run: async () => {
-        throw new Error('无法启动进程：spawn uv ENOENT');
+        throw new Error('无法启动进程：spawn powershell ENOENT');
       },
     });
     const done = harness.waitForDone();
@@ -179,7 +351,7 @@ describe('BabeldocService.install', () => {
       kind: 'install',
       ok: false,
       canceled: false,
-      message: '无法启动进程：spawn uv ENOENT',
+      message: '无法启动进程：spawn powershell ENOENT',
     });
     expect(harness.jobs.getState().toolTask).toBeNull();
   });
@@ -190,6 +362,7 @@ describe('BabeldocService.install', () => {
 
     await expect(harness.service.install()).rejects.toThrow(BUSY);
     expect(harness.run).not.toHaveBeenCalled();
+    expect(harness.prepare).not.toHaveBeenCalled();
     expect(harness.jobs.getState()).toMatchObject({
       toolTask: 'warmup',
       toolJobId: 'held-job',
@@ -315,7 +488,7 @@ describe('BabeldocService.getStatus', () => {
 });
 
 describe('BabeldocService.cancel', () => {
-  it('把取消转交给 runner', () => {
+  it('把普通任务的取消转交给 runner', () => {
     const harness = createHarness();
 
     expect(harness.service.cancel('job-1')).toBe(true);

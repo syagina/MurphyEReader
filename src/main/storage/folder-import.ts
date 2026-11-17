@@ -94,7 +94,9 @@ export async function runFolderImport(
     options.onProgress({ phase: 'copy', current: index + 1, total, file });
     try {
       const result = await importOne(file);
-      if (result.duplicate) {
+      // A restored duplicate copied its missing file back into the library,
+      // so it is real work rather than a skipped file.
+      if (result.duplicate && result.restored !== true) {
         summary.skipped += 1;
       } else {
         summary.imported += 1;

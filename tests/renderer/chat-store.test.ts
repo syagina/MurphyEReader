@@ -131,7 +131,7 @@ function resetStore(): void {
     messages: [],
     streamingByRequest: {},
     error: null,
-    fullTextMode: false,
+    contextMode: 'page',
     activeRequestId: null,
     requestConversation: {},
     lastFailedSendArgs: null,
@@ -329,7 +329,7 @@ describe('useChatStore.send', () => {
     api.conversations.list.mockResolvedValue([]);
     api.chat.send.mockResolvedValue({ requestId: 'r1' });
     await useChatStore.getState().loadForPaper(1);
-    useChatStore.getState().setFullTextMode(true);
+    useChatStore.getState().setContextMode('full');
 
     await useChatStore.getState().send({
       paperId: 1,
@@ -345,7 +345,7 @@ describe('useChatStore.send', () => {
       question,
       selectionText: '单元刚度矩阵',
       currentPageNo: 3,
-      fullTextMode: true,
+      contextMode: 'full',
     });
     const state = useChatStore.getState();
     expect(state.conversations[0]).toEqual(
@@ -384,7 +384,7 @@ describe('useChatStore.send', () => {
       paperId: 2,
       conversationId: 7,
       question: '新文献的问题',
-      fullTextMode: false,
+      contextMode: 'page',
     };
     useChatStore.setState({
       paperId: 2,
@@ -422,7 +422,7 @@ describe('useChatStore.send', () => {
       paperId: 1,
       conversationId: 1,
       question: '第二问',
-      fullTextMode: false,
+      contextMode: 'page',
     });
     expect(useChatStore.getState().messages).toHaveLength(1);
   });
@@ -581,7 +581,7 @@ describe('useChatStore 流式事件', () => {
       question: '问题',
       selectionText: '选文',
       currentPageNo: 2,
-      fullTextMode: false,
+      contextMode: 'page',
     });
 
     api.chat.send.mockResolvedValueOnce({ requestId: 'r2' });
@@ -605,7 +605,7 @@ describe('useChatStore 流式事件', () => {
         paperId: 1,
         conversationId: 1,
         question: '问题',
-        fullTextMode: false,
+        contextMode: 'page',
       },
     });
 
@@ -748,7 +748,7 @@ describe('useChatStore 会话管理', () => {
       paperId: 2,
       conversationId: 7,
       question: '新文献的问题',
-      fullTextMode: false,
+      contextMode: 'page',
     };
     useChatStore.setState({
       paperId: 2,

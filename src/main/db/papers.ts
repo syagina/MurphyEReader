@@ -1,5 +1,5 @@
 import type Database from 'better-sqlite3';
-import type { OutlineNode, Paper } from '@shared/types';
+import type { OutlineNode, Paper, PdfVersion } from '@shared/types';
 
 export interface NewPaperInput {
   title: string;
@@ -210,9 +210,11 @@ export function deletePaper(db: Database.Database, id: number): void {
 export function markRead(
   db: Database.Database,
   id: number,
-  version: 'original' | 'translated',
+  version: PdfVersion,
   pageNo: number,
 ): void {
+  // Both translated layouts share one reading position; only the original
+  // keeps a separate page.
   const column =
     version === 'original' ? 'last_page_original' : 'last_page_translated';
   db.prepare(

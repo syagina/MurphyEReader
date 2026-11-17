@@ -41,12 +41,12 @@ function tableNames(db: Database.Database): string[] {
 }
 
 describe('v1 → v2 迁移', () => {
-  it('将已有 v1 数据库原地升级到 v2，原有数据逐字段不变', () => {
+  it('将已有 v1 数据库原地升级到当前版本，原有数据逐字段不变', () => {
     createV1Database();
 
     const db = openDb(dbPath);
 
-    expect(db.pragma('user_version', { simple: true })).toBe(2);
+    expect(db.pragma('user_version', { simple: true })).toBe(4);
     expect(getPaper(db, 1)).toMatchObject({
       id: 1,
       title: '旧文献',
@@ -63,7 +63,7 @@ describe('v1 → v2 迁移', () => {
     db.close();
   });
 
-  it('重复打开 v2 数据库保持幂等，数据不重复也不丢失', () => {
+  it('重复打开数据库保持幂等，数据不重复也不丢失', () => {
     createV1Database();
 
     const first = openDb(dbPath);
@@ -71,7 +71,7 @@ describe('v1 → v2 迁移', () => {
 
     const second = openDb(dbPath);
 
-    expect(second.pragma('user_version', { simple: true })).toBe(2);
+    expect(second.pragma('user_version', { simple: true })).toBe(4);
     expect(listPapers(second)).toHaveLength(1);
     expect(getPaper(second, 1)?.title).toBe('旧文献');
     second.close();
@@ -125,10 +125,10 @@ describe('v1 → v2 迁移', () => {
     db.close();
   });
 
-  it('全新数据库直接以 v2 初始化', () => {
+  it('全新数据库直接以当前版本初始化', () => {
     const db = openDb(dbPath);
 
-    expect(db.pragma('user_version', { simple: true })).toBe(2);
+    expect(db.pragma('user_version', { simple: true })).toBe(4);
     expect(tableNames(db)).toEqual(expect.arrayContaining(['papers', 'folders', 'settings']));
     db.close();
   });

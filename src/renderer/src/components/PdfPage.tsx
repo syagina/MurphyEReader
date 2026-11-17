@@ -1,11 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { TextLayer } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { DrawingCaptureLayer, DrawingLayer } from './DrawingLayer';
+import type { PdfDrawingConfig } from './DrawingLayer';
 
 interface PdfPageProps {
   pdf: PDFDocumentProxy;
   pageNo: number;
   zoom: number;
+  /** Rendered above the canvas and below the selectable text layer. */
+  overlay?: React.ReactNode;
+  /** Rendered above the text layer (page-margin pin icons stay clickable). */
+  pinOverlay?: React.ReactNode;
+  /** Stored ink/shape records plus the drawing-mode capture surface. */
+  drawing?: PdfDrawingConfig;
 }
 
 /**
@@ -13,10 +21,24 @@ interface PdfPageProps {
  * text layer. Only mounted for pages inside the scroll window; the parent
  * keeps placeholders for the rest.
  */
-export function PdfPage({ pdf, pageNo, zoom }: PdfPageProps): React.JSX.Element {
+export function PdfPage({
+  pdf,
+  pageNo,
+  zoom,
+  overlay,
+  pinOverlay,
+  drawing,
+}: PdfPageProps): React.JSX.Element {
   const [page, setPage] = useState<PDFPageProxy | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const textLayerRef = useRef<HTMLDivElement | null>(null);
+
+  // CSS-pixel viewport shared by the drawing layers. The canvas effect below
+  // keeps its own device-pixel viewport.
+  const viewport = useMemo(
+    () => (page === null ? null : page.getViewport({ scale: zoom })),
+    [page, zoom],
+  );
 
   useEffect(() => {
     let cancelled = false;
@@ -106,7 +128,24 @@ export function PdfPage({ pdf, pageNo, zoom }: PdfPageProps): React.JSX.Element 
   return (
     <>
       <canvas ref={canvasRef} className="pdf-canvas" aria-label={`第 ${pageNo} 页`} />
+      {overlay}
       <div ref={textLayerRef} className="textLayer" style={textLayerStyle} />
+      {page !== null && viewport !== null && drawing !== undefined && (
+        <DrawingLayer
+          notes={drawing.notes}
+          pageWidth={viewport.width}
+          pageHeight={viewport.height}
+          rotation={page.rotate}
+          zoom={zoom}
+        />
+      )}
+      {pinOverlay}
+      {page !== null &&
+        viewport !== null &&
+        drawing !== undefined &&
+        drawing.enabled && (
+          <DrawingCaptureLayer page={page} zoom={zoom} {...drawing} />
+        )}
     </>
   );
 }

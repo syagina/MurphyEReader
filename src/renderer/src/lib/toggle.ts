@@ -1,14 +1,16 @@
+import type { PdfVersion } from '@shared/types';
 import { clampPage } from './pdf';
 
 /**
  * Picks the page to show after switching between the original PDF and its
  * translation. When both versions have the same page count the two views are
  * assumed aligned, so the current page carries over; otherwise each version
- * remembers its own last page.
+ * remembers its own last page. Switching between the two translated layouts
+ * always carries the current page because they describe the same document.
  */
 export function resolveToggleTargetPage(input: {
-  from: 'original' | 'translated';
-  to: 'original' | 'translated';
+  from: PdfVersion;
+  to: PdfVersion;
   currentPage: number;
   lastPageOriginal: number;
   lastPageTranslated: number;
@@ -19,7 +21,8 @@ export function resolveToggleTargetPage(input: {
     input.to === 'original' ? input.pageCountOriginal : (input.pageCountTranslated ?? 0);
   const samePageCounts =
     input.pageCountTranslated !== null && input.pageCountTranslated === input.pageCountOriginal;
-  if (input.from === input.to || samePageCounts) {
+  const betweenTranslations = input.from !== 'original' && input.to !== 'original';
+  if (input.from === input.to || samePageCounts || betweenTranslations) {
     return clampPage(input.currentPage, targetCount);
   }
   const targetLastPage =

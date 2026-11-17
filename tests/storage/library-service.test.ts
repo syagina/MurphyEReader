@@ -12,10 +12,12 @@ import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openDb } from '@main/db';
+import { createNote, getNote } from '@main/db/notes';
 import { createPaper, getPaper, listPapers, updatePaper } from '@main/db/papers';
 import type { NewPaperInput } from '@main/db/papers';
 import { getPages } from '@main/db/pages';
 import { JobRegistry } from '@main/jobs/job-registry';
+import { sha256File } from '@main/storage/hash';
 import { PaperLibrary } from '@main/storage/library-service';
 import type { PaperLibraryDeps } from '@main/storage/library-service';
 import {
@@ -99,6 +101,99 @@ describe('PaperLibrary.importPaper', () => {
     const second = await library.importPaper(SAMPLE_TEXT_PDF);
     expect(second).toMatchObject({ duplicate: true, paper: { id: first.paper.id } });
     expect(listPapers(db)).toHaveLength(1);
+  });
+
+  it('原文文件丢失后重新导入会恢复原记录并保留笔记', async () => {
+    const library = makeLibrary();
+    const imported = await library.importPaper(SAMPLE_TEXT_PDF);
+    const note = createNote(db, {
+      paperId: imported.paper.id,
+      type: 'manual',
+      title: '我的笔记',
+      contentMd: '这篇文献的笔记必须保留。',
+      tags: [],
+    });
+    updatePaper(db, imported.paper.id, { tags: ['重点'] });
+    const folder = join(root, imported.paper.storageDir!);
+    rmSync(folder, { recursive: true, force: true });
+
+    const restored = await library.importPaper(SAMPLE_TEXT_PDF);
+
+    expect(restored).toMatchObject({
+      duplicate: true,
+      restored: true,
+      paper: {
+        id: imported.paper.id,
+        storageDir: imported.paper.storageDir,
+        title: imported.paper.title,
+      },
+    });
+    expect(restored.paper.tags).toEqual(['重点']);
+    expect(existsSync(restored.paper.filePathOriginal)).toBe(true);
+    expect(existsSync(join(folder, 'notes'))).toBe(true);
+    expect(getPages(db, imported.paper.id)).toHaveLength(2);
+    expect(listPapers(db)).toHaveLength(1);
+    expect(getNote(db, note.id)?.title).toBe('我的笔记');
+  });
+
+  it('恢复时解除已缺失的译本绑定', async () => {
+    const library = makeLibrary();
+    const imported = await library.importPaper(SAMPLE_TEXT_PDF);
+    await library.attachTranslated(imported.paper.id, SAMPLE_SCANNED_PDF);
+    const bound = getPaper(db, imported.paper.id)!;
+    expect(bound.filePathTranslated).not.toBeNull();
+    rmSync(join(root, bound.storageDir!), { recursive: true, force: true });
+
+    const restored = await library.importPaper(SAMPLE_TEXT_PDF);
+
+    expect(restored.restored).toBe(true);
+    expect(restored.paper.filePathTranslated).toBeNull();
+    expect(restored.paper.pageCountTranslated).toBeNull();
+    expect(restored.paper.lastPageTranslated).toBe(1);
+    expect(getPages(db, imported.paper.id)).toHaveLength(2);
+  });
+
+  it('未托管旧记录的文件被删后按哈希恢复为托管文献', async () => {
+    const hash = await sha256File(SAMPLE_TEXT_PDF);
+    const paper = createPaper(
+      db,
+      makeInput({
+        title: '旧记录',
+        filePathOriginal: join(tempDir, 'deleted.pdf'),
+        fileHash: hash,
+      }),
+    );
+    const library = makeLibrary();
+
+    const restored = await library.importPaper(SAMPLE_TEXT_PDF);
+
+    expect(restored).toMatchObject({
+      duplicate: true,
+      restored: true,
+      paper: {
+        id: paper.id,
+        storageDir: canonicalStorageDir(paper.id, '旧记录'),
+      },
+    });
+    expect(restored.paper.filePathOriginal).toBe(
+      storageFile(root, restored.paper.storageDir!, ORIGINAL_PDF_NAME),
+    );
+    expect(existsSync(restored.paper.filePathOriginal)).toBe(true);
+    expect(getPages(db, paper.id)).toHaveLength(2);
+    expect(listPapers(db)).toHaveLength(1);
+  });
+
+  it('原文仍在的重复导入不进入恢复流程', async () => {
+    const first = await makeLibrary().importPaper(SAMPLE_TEXT_PDF);
+    const copyFile = vi.fn(async (): Promise<void> => {
+      throw new Error('不应复制');
+    });
+
+    const second = await makeLibrary({ copyFile }).importPaper(SAMPLE_TEXT_PDF);
+
+    expect(second).toMatchObject({ duplicate: true, paper: { id: first.paper.id } });
+    expect(second.restored).toBeUndefined();
+    expect(copyFile).not.toHaveBeenCalled();
   });
 
   it('规范文件夹里只有 original.pdf 与空的 notes/', async () => {

@@ -5,6 +5,7 @@ import {
   appendAiNoteContent,
   buildAiNoteAppendSection,
   buildNewAiNoteContent,
+  findAssistantAnchor,
   findAssistantSourcePage,
   mergeAiNoteTags,
   suggestAiNoteTitle,
@@ -48,6 +49,53 @@ describe('findAssistantSourcePage', () => {
     ];
     expect(findAssistantSourcePage(messages, 2)).toBeNull();
     expect(findAssistantSourcePage(messages, 999)).toBeNull();
+  });
+});
+
+describe('findAssistantAnchor', () => {
+  it('returns the nearest earlier question page and its selected text', () => {
+    const messages = [
+      makeMessage(1, 'user', { pageNo: 3, selectionText: '旧选文' }),
+      makeMessage(2, 'assistant'),
+      makeMessage(3, 'user', { pageNo: 7, selectionText: '  当前选文  ' }),
+      makeMessage(4, 'assistant'),
+    ];
+
+    expect(findAssistantAnchor(messages, 4, 9)).toEqual({
+      pageNo: 7,
+      selectionText: '当前选文',
+    });
+  });
+
+  it('omits empty selection text and falls back to the question page', () => {
+    const messages = [
+      makeMessage(1, 'user', { pageNo: 5, selectionText: '   ' }),
+      makeMessage(2, 'assistant'),
+    ];
+
+    expect(findAssistantAnchor(messages, 2, 9)).toEqual({ pageNo: 5 });
+  });
+
+  it('uses the current page when the nearest question has no page or none exists', () => {
+    const messages = [
+      makeMessage(1, 'user', { pageNo: null, selectionText: '选文' }),
+      makeMessage(2, 'assistant'),
+      makeMessage(3, 'assistant'),
+    ];
+
+    expect(findAssistantAnchor(messages, 2, 6)).toEqual({
+      pageNo: 6,
+      selectionText: '选文',
+    });
+    // Consecutive assistants still belong to the same earlier question.
+    expect(findAssistantAnchor(messages, 3, 6)).toEqual({
+      pageNo: 6,
+      selectionText: '选文',
+    });
+    expect(
+      findAssistantAnchor([makeMessage(5, 'assistant')], 5, 2),
+    ).toEqual({ pageNo: 2 });
+    expect(findAssistantAnchor(messages, 999, 4)).toEqual({ pageNo: 4 });
   });
 });
 

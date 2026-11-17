@@ -1,6 +1,8 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { Paper } from '@shared/types';
+import type { Paper, PdfVersion } from '@shared/types';
+import { TRANSLATION_REPAIRED_NOTICE } from '@shared/translation';
+import { useLibraryStore } from '@renderer/stores/library';
 import { useReaderStore } from '@renderer/stores/reader';
 
 function makePaper(overrides: Partial<Paper> = {}): Paper {
@@ -29,17 +31,37 @@ function makePaper(overrides: Partial<Paper> = {}): Paper {
 
 function installApi() {
   const get = vi.fn(async (_id: number): Promise<Paper | null> => makePaper());
+  const list = vi.fn(async (): Promise<Paper[]> => []);
+  const checkFiles = vi.fn(
+    async (): Promise<
+      {
+        id: number;
+        originalExists: boolean;
+        translatedExists: boolean;
+        bilingualExists: boolean;
+        translatedIsBilingual: boolean;
+      }[]
+    > => [],
+  );
   const load = vi.fn(
     async (
       _paperId: number,
-      _version: 'original' | 'translated',
-    ): Promise<{ data: ArrayBuffer; fileName: string }> => ({
+      _version: PdfVersion,
+    ): Promise<{
+      data: ArrayBuffer;
+      fileName: string;
+      repaired?: boolean;
+      pageCountTranslated?: number;
+    }> => ({
       data: new ArrayBuffer(8),
       fileName: 'sample.pdf',
     }),
   );
-  (window as unknown as { api: unknown }).api = { papers: { get }, pdf: { load } };
-  return { get, load };
+  (window as unknown as { api: unknown }).api = {
+    papers: { get, list, checkFiles },
+    pdf: { load },
+  };
+  return { get, list, checkFiles, load };
 }
 
 interface Deferred<T> {
@@ -77,8 +99,10 @@ function resetStore(): void {
     error: null,
     selection: null,
     failedVersion: null,
+    versionNotice: null,
     pendingInitialPage: null,
   });
+  useLibraryStore.setState({ papers: [], loading: false, fileStatus: {} });
 }
 
 beforeEach(() => {
@@ -312,6 +336,115 @@ describe('useReaderStore.open', () => {
   });
 });
 
+describe('useReaderStore.setVersion', () => {
+  it('译本被自动修复时采用双语页数并显示提示', async () => {
+    useReaderStore.setState({
+      paperId: 1,
+      version: 'original',
+      pageCount: 10,
+      currentPage: 3,
+    });
+    api.get.mockResolvedValue(
+      makePaper({
+        filePathTranslated: 'C:/papers/translated.zh-CN.dual.pdf',
+        pageCountTranslated: 10,
+        lastPageTranslated: 4,
+      }),
+    );
+    api.load.mockResolvedValue({
+      data: new ArrayBuffer(8),
+      fileName: 'dual.pdf',
+      repaired: true,
+      pageCountTranslated: 12,
+    });
+
+    await useReaderStore.getState().setVersion('translated');
+
+    const state = useReaderStore.getState();
+    expect(state.version).toBe('translated');
+    expect(state.pageCount).toBe(12);
+    // The page counts differ now, so the remembered translated page is used.
+    expect(state.currentPage).toBe(4);
+    expect(state.versionNotice).toBe(TRANSLATION_REPAIRED_NOTICE);
+    await vi.waitFor(() => {
+      expect(api.list).toHaveBeenCalled();
+      expect(api.checkFiles).toHaveBeenCalled();
+    });
+  });
+
+  it('普通切换不显示修复提示', async () => {
+    useReaderStore.setState({ paperId: 1, version: 'original', pageCount: 10 });
+    api.get.mockResolvedValue(
+      makePaper({
+        filePathTranslated: 'C:/papers/translated.zh-CN.mono.pdf',
+        pageCountTranslated: 10,
+      }),
+    );
+
+    await useReaderStore.getState().setVersion('translated');
+
+    expect(useReaderStore.getState().version).toBe('translated');
+    expect(useReaderStore.getState().versionNotice).toBeNull();
+    expect(api.list).not.toHaveBeenCalled();
+  });
+
+  it('在仅译文与中英对照之间切换时保持当前页', async () => {
+    useReaderStore.setState({
+      paperId: 1,
+      version: 'translated',
+      pageCount: 10,
+      currentPage: 5,
+    });
+    api.get.mockResolvedValue(
+      makePaper({
+        filePathTranslated: 'C:/papers/translated.zh-CN.mono.pdf',
+        pageCountTranslated: 10,
+        lastPageTranslated: 2,
+      }),
+    );
+
+    await useReaderStore.getState().setVersion('bilingual');
+
+    const state = useReaderStore.getState();
+    expect(api.load).toHaveBeenCalledWith(1, 'bilingual');
+    expect(state.version).toBe('bilingual');
+    expect(state.pageCount).toBe(10);
+    // Both translated layouts share a page numbering, so the live page wins
+    // over the remembered translated page.
+    expect(state.currentPage).toBe(5);
+  });
+
+  it('未绑定译本时两种译本视图都拒绝切换', async () => {
+    useReaderStore.setState({
+      paperId: 1,
+      version: 'original',
+      pageCount: 10,
+      currentPage: 3,
+    });
+
+    await useReaderStore.getState().setVersion('bilingual');
+    expect(useReaderStore.getState().error).toBe('未绑定译本');
+    expect(useReaderStore.getState().failedVersion).toBe('bilingual');
+    expect(api.load).not.toHaveBeenCalled();
+  });
+
+  it('dismissVersionNotice 清除提示', () => {
+    useReaderStore.setState({ versionNotice: TRANSLATION_REPAIRED_NOTICE });
+
+    useReaderStore.getState().dismissVersionNotice();
+
+    expect(useReaderStore.getState().versionNotice).toBeNull();
+  });
+
+  it('打开另一篇文献时清除提示', async () => {
+    useReaderStore.setState({ versionNotice: TRANSLATION_REPAIRED_NOTICE });
+
+    await useReaderStore.getState().open(1);
+
+    expect(useReaderStore.getState().versionNotice).toBeNull();
+  });
+});
+
 describe('useReaderStore 边界控制', () => {
   beforeEach(() => {
     useReaderStore.setState({ pageCount: 10, paperId: 1 });
@@ -343,8 +476,14 @@ describe('useReaderStore 边界控制', () => {
       currentPage: 4,
       zoom: 2,
       error: '出错了',
-      selection: { text: '选中文字', pageNo: 4 },
+      selection: {
+        text: '选中文字',
+        pageNo: 4,
+        version: 'original',
+        rects: [{ x: 0.1, y: 0.2, width: 0.3, height: 0.04 }],
+      },
       failedVersion: 'original',
+      versionNotice: TRANSLATION_REPAIRED_NOTICE,
     });
 
     useReaderStore.getState().close();
@@ -358,11 +497,18 @@ describe('useReaderStore 边界控制', () => {
     expect(state.error).toBeNull();
     expect(state.selection).toBeNull();
     expect(state.failedVersion).toBeNull();
+    expect(state.versionNotice).toBeNull();
   });
 
   it('setSelection 与 setError 写入状态', () => {
-    useReaderStore.getState().setSelection({ text: '一段话', pageNo: 2 });
-    expect(useReaderStore.getState().selection).toEqual({ text: '一段话', pageNo: 2 });
+    const selection = {
+      text: '一段话',
+      pageNo: 2,
+      version: 'original' as const,
+      rects: [{ x: 0.1, y: 0.2, width: 0.3, height: 0.04 }],
+    };
+    useReaderStore.getState().setSelection(selection);
+    expect(useReaderStore.getState().selection).toEqual(selection);
 
     useReaderStore.getState().setError('无法打开');
     expect(useReaderStore.getState().error).toBe('无法打开');
