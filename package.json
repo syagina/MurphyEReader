@@ -7,6 +7,14 @@
   "main": "./out/main/index.js",
   "private": true,
   "license": "UNLICENSED",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/syagina/MurphyEReader.git"
+  },
+  "homepage": "https://github.com/syagina/MurphyEReader#readme",
+  "bugs": {
+    "url": "https://github.com/syagina/MurphyEReader/issues"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",

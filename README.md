@@ -27,6 +27,8 @@ MurphyEReader 是一款 Windows 桌面 PDF 阅读器，围绕论文阅读、翻�
 
 阅读界面：大纲、PDF 阅读、智慧阅读与标注工具。
 
+> 截图中的论文为开放获取论文，仅用于界面演示。
+
 ## 系统要求
 
 - Windows 10 / 11（x64）
@@ -36,6 +38,8 @@ MurphyEReader 是一款 Windows 桌面 PDF 阅读器，围绕论文阅读、翻�
 ## 安装
 
 从 [Releases](../../releases) 下载 `MurphyEReader-<version>-setup.exe` 并安装。首次启动会进入引导流程，配置 AI 接口和（可选的）排版翻译引擎。
+
+> 安装包当前未做代码签名，Windows SmartScreen 可能提示“已保护你的电脑”。选择“更多信息” → “仍要运行”即可。
 
 ## 从源码构建
 
@@ -57,7 +61,7 @@ npm run package    # 构建 Windows 安装包，输出到 dist/
 
 ## 数据位置
 
-- 应用数据：`%APPDATA%\MurphyEReader`；从旧版本升级时可能继续使用 `%APPDATA%\paperlens` 以保留原有文献库。
+- 应用数据：`%APPDATA%\MurphyEReader`。
 - 默认文献库：`文档\MurphyEReader`，可在设置中修改。
 - 文献、笔记、标注与设置均保存在本机；应用不上传文献库，也不包含遥测。
 
@@ -71,6 +75,10 @@ src/shared     主进程与渲染层共享的类型和常量
 tests          Vitest 测试
 build         应用图标与打包资源
 ```
+
+## 问题反馈
+
+请通过 [GitHub Issues](https://github.com/syagina/MurphyEReader/issues) 反馈问题。提交前请先搜索是否已有相同问题，并附上复现步骤；请勿在 Issue 中粘贴 API Key 或论文全文。
 
 ## 贡献
 
