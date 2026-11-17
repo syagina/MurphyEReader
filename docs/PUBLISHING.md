@@ -1,8 +1,8 @@
 # 发布到 GitHub 前的检查清单
 
 本文档用于把 MurphyEReader 首次发布到 GitHub（公开或私有）前的自查。
-当前仓库在 `impl/paperlens` 分支，且存在大量未提交改动；**未经确认不要直接
-提交或推送**。
+当前发布 tag 为 `v1.0.0`，工作区干净；推送动作仍需本人确认。公开推送会
+一并公开完整的 Git 提交历史。
 
 ## 1. 先决定发布范围
 
@@ -68,14 +68,15 @@ gitleaks detect --source . --redact --verbose
 - [ ] `README.md` 已核对：功能、构建命令、数据位置、隐私说明与实际一致。
 - [ ] `build/icon.png` 已加入版本控制（README 顶部引用它）。
 - [ ] 截图放在 `docs/screenshots/`，且不包含真实密钥、论文正文或个人路径。
-- [ ] 版本号已确定（如 `1.0.0`），并同步 `package.json`。
-- [ ] 安装包已用新名字/新图标重新构建：`npm run package`。
-- [ ] 安装包输出为 `dist/MurphyEReader-<version>-setup.exe`，不要提交进 Git。
+- [x] 版本号已确定为 `1.0.0`，并已同步 `package.json`。
+- [x] 安装包已用新名字/新图标重新构建：`npm run package`。
+- [x] 安装包输出为 `dist/MurphyEReader-1.0.0-setup.exe`，不要提交进 Git。
+- [x] 安装包 SHA-256：`09ab7e88d11661bd8b5d76d89d92b8af32984c92406a01bc3a16f711332fd84a`（未签名，首次运行可能触发 SmartScreen）。
 - [ ] 当前 `dist/` 下旧版 `PaperLens-0.1.0-setup.exe` 不要发布。
 
 ## 5. GitHub 仓库设置
 
-- [ ] 创建仓库后设置默认分支（建议 `main`；当前分支是 `impl/paperlens`）。
+- [ ] 创建仓库后设置默认分支（建议 `main`）。本地发布分支是 `impl/paperlens`，首次推送时映射为远程 `main`，未在本地合并 `main`。
 - [ ] 填写仓库描述和 topics（Electron、PDF、AI、translation、paper-reading）。
 - [ ] 公开仓库开启 **Secret Scanning** 与 **Dependabot alerts**。
 - [ ] 如需接收漏洞报告，开启 Private vulnerability reporting。
@@ -86,14 +87,26 @@ gitleaks detect --source . --redact --verbose
 Get-FileHash .\dist\MurphyEReader-1.0.0-setup.exe -Algorithm SHA256
 ```
 
-## 6. 提交与推送（需本人确认）
+## 6. 推送（需本人确认）
 
-确认无误后，再显式添加需要发布的文件，避免 `git add -A` 误收本地文件：
+发布提交和 tag 已在本机创建，尚未配置远程、尚未推送。确认无误后执行：
 
-```bash
-git add README.md LICENSE NOTICE.md docs/PUBLISHING.md .gitignore package.json package-lock.json
-git status
-git commit -m "docs: add project documentation and proprietary license"
+```powershell
+# 1. 重新登录（当前 keyring 里的 token 已失效），确认账号是 syagina
+gh auth login -h github.com
+
+# 2. 创建空仓库并添加 origin；不要勾选 README/LICENSE/gitignore
+gh repo create MurphyEReader --public --source . --remote origin
+
+# 3. 首次推送：本地发布分支映射为远程 main，不涉及本地合并
+git push -u origin impl/paperlens:main
+git push origin v1.0.0
+```
+
+如果已在网页创建空仓库，第 2 步改用：
+
+```powershell
+git remote add origin https://github.com/syagina/MurphyEReader.git
 ```
 
 推送前再次确认分支与远程：
@@ -105,7 +118,9 @@ git branch --show-current
 
 - [ ] 确认远程地址是目标仓库。
 - [ ] 确认没有把私有数据推上去。
+- [ ] 确认 GitHub 默认分支为 `main`。
 - [ ] 首次推送后检查 GitHub 的 Secret Scanning 结果。
+- [ ] 在 Releases 上传 `dist/MurphyEReader-1.0.0-setup.exe`，不要提交进 Git。
 
 ## 7. 如果之后要申请软著
 
