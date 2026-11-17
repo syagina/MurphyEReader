@@ -23,7 +23,9 @@ MurphyEReader 是一款 Windows 桌面 PDF 阅读器，围绕论文阅读、翻�
 
 ## 界面截图
 
-> 截图待补充。发布前请使用申请/发布版本的正式界面，在 `docs/screenshots/` 中放置截图，并确保不包含真实 API Key、论文正文、个人路径或其他隐私信息。
+![MurphyEReader 主界面](docs/screenshots/main-window.png)
+
+阅读界面：大纲、PDF 阅读、智慧阅读与标注工具。
 
 ## 系统要求
 
