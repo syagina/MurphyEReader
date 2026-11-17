@@ -4,6 +4,7 @@ dist/
 dist-next/
 dist-review/
 .superpowers/
+docs/superpowers/
 *.log
 .DS_Store
 tests/fixtures/*.pdf

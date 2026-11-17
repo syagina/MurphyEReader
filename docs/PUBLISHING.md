@@ -8,8 +8,7 @@
 
 - [ ] 仓库公开还是私有？
 - [ ] 是否同时发布安装包？（建议放到 GitHub Releases，而不是提交进 Git）
-- [ ] `docs/superpowers/` 里的设计/计划文档是否要公开？其中可能包含开发过程、
-      AI 协作记录或内部决策，建议先逐篇检查。
+- [x] `docs/superpowers/` 与 `.superpowers/` 是本地开发资料，不进入公开仓库。
 - [ ] 是否保留 `tmp/`、`dist-next/`、`dist-review/` 等本地目录？（这些不应发布）
 
 ## 2. 文件与 Git 历史扫描
