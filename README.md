@@ -4,115 +4,115 @@
 
 <h1 align="center">MurphyEReader</h1>
 
-<p align="center">面向论文阅读的 AI 桌面阅读器</p>
+<p align="center">An AI-powered desktop PDF reader for academic papers</p>
 
 <p align="center">
-  <strong>中文</strong> | <a href="README.en.md">English</a>
+  <a href="README.zh-CN.md">中文</a> | <strong>English</strong>
 </p>
 
-MurphyEReader 是一款 Windows 桌面 PDF 阅读器，围绕论文阅读、翻译、笔记与 AI 问答设计。应用使用 Electron + React + TypeScript 构建，文献与笔记保存在本机 SQLite 数据库中。
+MurphyEReader is a Windows desktop PDF reader built around paper reading, translation, notes, and AI Q&A. It is built with Electron + React + TypeScript, and stores papers and notes in a local SQLite database.
 
-> **许可证说明**：本仓库公开源代码供查看，但采用**专有许可**，并非开源软件。未经版权持有人书面许可，不得复制、修改、分发或商用。详见 [LICENSE](LICENSE)。
+> **License**: This repository is public for source viewing, but the software is **proprietary**, not open source. No copying, modification, distribution, or commercial use is permitted without written permission from the copyright holder. See [LICENSE](LICENSE).
 
-## 功能
+## Features
 
-- **文献库**：导入 PDF 或整个文件夹，统一复制和管理；支持文件夹分类、搜索与阅读状态。
-- **PDF 阅读**：连续滚动、缩放、页内搜索、大纲、当前页码提示与全屏阅读。
-- **智慧阅读**：可停靠或浮动的 AI 助手，支持仅本页、全文和纯对话三种上下文模式。
-- **划词翻译**：选中文本后翻译、问 AI 或复制；中文与英文双向识别。
-- **保留版式翻译**：基于 BabelDOC 生成单语或中英对照译本，尽量保留原文排版。
-- **标注与笔记**：高亮、下划线、删除线、自由绘制、便签与笔记编辑；支持导出 Word。
-- **外观**：浅色、深色、护眼与纸张质感模式，可调纸纹强度。
-- **首次引导**：内置新手教程与 AI 接口配置引导。
+- **Library**: Import PDFs or entire folders and manage them in one place; folder organization, search, and reading status.
+- **PDF reading**: Continuous scrolling, zoom, in-document search, outline, current page indicator, and full-screen reading.
+- **Smart Reading**: A dockable or floating AI assistant with page-only, full-paper, and chat-only context modes.
+- **Selection translation**: Select text to translate, ask AI, or copy; detects Chinese and English in both directions.
+- **Layout-preserving translation**: Generates monolingual or bilingual PDFs with BabelDOC, preserving the original layout as much as possible.
+- **Annotations and notes**: Highlights, underlines, strikethroughs, freehand drawing, sticky notes, and note editing; export to Word.
+- **Appearance**: Light, dark, eye-care, and paper-texture modes, with adjustable paper grain.
+- **Onboarding**: Built-in tutorial and AI provider setup guide.
 
-## 界面截图
+## Screenshot
 
-![MurphyEReader 主界面](docs/screenshots/main-window.png)
+![MurphyEReader main window](docs/screenshots/main-window.png)
 
-阅读界面：大纲、PDF 阅读、智慧阅读与标注工具。
+Reading view: outline, PDF, Smart Reading, and annotation tools.
 
-> 截图中的论文为开放获取论文，仅用于界面演示。
+> The paper shown in the screenshot is open access and is used for interface demonstration only.
 
-## 系统要求
+## System requirements
 
-- Windows 10 / 11（x64）
-- 安装版无需预装 Node.js
-- 从源码构建需要 Node.js 20.19+ 或 22.12+（建议 22 LTS）与 npm
+- Windows 10 / 11 (x64)
+- The installed app does not require Node.js
+- Building from source requires Node.js 20.19+ or 22.12+ (22 LTS recommended) and npm
 
-## 安装
+## Installation
 
-从 [Releases](../../releases) 下载 `MurphyEReader-<version>-setup.exe` 并安装。首次启动会进入引导流程，配置 AI 接口和（可选的）排版翻译引擎。
+Download `MurphyEReader-<version>-setup.exe` from [Releases](../../releases) and install it. On first launch, the onboarding flow helps you configure the AI provider and (optionally) the layout translation engine.
 
-> 安装包当前未做代码签名，Windows SmartScreen 可能提示“已保护你的电脑”。选择“更多信息” → “仍要运行”即可。
+> The installer is currently unsigned, so Windows SmartScreen may show "Windows protected your PC". Choose "More info" → "Run anyway".
 
-## 从源码构建
+## Build from source
 
 ```bash
 npm install
-npm run dev        # 开发模式
-npm test           # 运行测试
-npm run typecheck  # 类型检查
-npm run package    # 构建 Windows 安装包，输出到 dist/
+npm run dev        # development
+npm test           # run tests
+npm run typecheck  # type check
+npm run package    # build the Windows installer into dist/
 ```
 
-安装包默认输出为 `dist/MurphyEReader-<version>-setup.exe`。
+The installer is written to `dist/MurphyEReader-<version>-setup.exe` by default.
 
-## AI 与翻译
+## AI and translation
 
-- 支持任意 OpenAI 兼容接口（例如 DeepSeek）。API Key 仅保存在本机，使用 Electron `safeStorage` 加密，不会上传到本项目服务器。
-- 使用 AI 功能时，相关论文文本会发送到你配置的 AI 服务商，请阅读对应服务商的隐私政策。
-- 保留版式翻译依赖 [BabelDOC](https://github.com/funstory-ai/BabelDOC) 0.7.1（AGPL-3.0）。应用通过一键安装从官方源下载，不随本仓库分发；第三方许可说明见 [NOTICE.md](NOTICE.md)。
+- Works with any OpenAI-compatible API (for example DeepSeek). API keys are stored only on this machine, encrypted with Electron `safeStorage`, and are never uploaded to this project's servers.
+- When you use AI features, the relevant paper text is sent to the AI provider you configure. Please review that provider's privacy policy.
+- Layout-preserving translation uses [BabelDOC](https://github.com/funstory-ai/BabelDOC) 0.7.1 (AGPL-3.0). The app downloads it from the official source through one-click installation; it is not distributed with this repository. See [NOTICE.md](NOTICE.md) for third-party notices.
 
-## 数据位置
+## Data locations
 
-- 应用数据：`%APPDATA%\MurphyEReader`。
-- 默认文献库：`文档\MurphyEReader`，可在设置中修改。
-- 文献、笔记、标注与设置均保存在本机；应用不上传文献库，也不包含遥测。
+- Application data: `%APPDATA%\MurphyEReader`.
+- Default library: `Documents\MurphyEReader`, configurable in Settings.
+- Papers, notes, annotations, and settings stay on this machine. The app does not upload your library and contains no telemetry.
 
-## 项目结构
+## Project structure
 
 ```text
-src/main       Electron 主进程：数据库、IPC、AI、翻译与存储
-src/preload    预加载脚本与类型声明
-src/renderer   React 渲染层：文献库、阅读器、AI 面板与设置
-src/shared     主进程与渲染层共享的类型和常量
-tests          Vitest 测试
-build         应用图标与打包资源
+src/main      Electron main process: database, IPC, AI, translation, and storage
+src/preload   Preload scripts and type declarations
+src/renderer  React renderer: library, reader, AI panel, and settings
+src/shared    Types and constants shared by main and renderer
+tests         Vitest tests
+build         App icons and packaging resources
 ```
 
-## 更新日志
+## Changelog
 
-### v1.0.1（2026-11-19）
+### v1.0.1 (2026-11-19)
 
-- 增加 PDF 规范纠错：对扫描件 PDF 加入判断，没有文字层时提示先 OCR 再翻译。
-- 优化翻译日志：进度与状态显示更准确。
-- 优化翻译速度。
+- Added PDF validation: scanned PDFs are detected, and files without a text layer prompt you to OCR them before translation.
+- Improved translation logs: progress and status are more accurate.
+- Improved translation speed.
 
-### v1.0.0（2026-11-17）
+### v1.0.0 (2026-11-17)
 
-- 首个公开版本：文献库、PDF 阅读、智慧阅读、划词翻译、保留版式翻译、标注与笔记、外观与首次引导。
+- First public release: library, PDF reading, Smart Reading, selection translation, layout-preserving translation, annotations and notes, appearance, and onboarding.
 
 <details>
-<summary>展开显示全部更新</summary>
+<summary>Show all updates</summary>
 
-当前公开版本即以上 v1.0.1 与 v1.0.0；更早版本未公开发布。
+The public releases are v1.0.1 and v1.0.0 above; no earlier versions have been published.
 
 </details>
 
-## 问题反馈
+## Feedback
 
-请通过 [GitHub Issues](https://github.com/syagina/MurphyEReader/issues) 反馈问题。提交前请先搜索是否已有相同问题，并附上复现步骤；请勿在 Issue 中粘贴 API Key 或论文全文。
+Please report issues via [GitHub Issues](https://github.com/syagina/MurphyEReader/issues). Search for existing issues first and include reproduction steps. Do not paste API keys or full paper text into an issue.
 
-## 贡献
+## Contributing
 
-本项目为专有软件，暂不接受未经邀请的代码贡献。提交 Issue 或 Pull Request 不代表获得任何使用许可。
+This is proprietary software; unsolicited code contributions are not accepted. Opening an Issue or Pull Request does not grant any license to use the software.
 
-## 许可证
+## License
 
 Copyright (c) 2026 syagina. All rights reserved.
 
-本项目采用专有许可，详见 [LICENSE](LICENSE)。第三方组件仍受其各自许可证约束，详见 [NOTICE.md](NOTICE.md)。
+This project is proprietary. See [LICENSE](LICENSE). Third-party components remain under their respective licenses; see [NOTICE.md](NOTICE.md).
 
-## 免责声明
+## Disclaimer
 
-AI 问答与机器翻译结果可能存在错误或遗漏，请自行核对。使用本软件处理文献时，请遵守文献的版权和许可要求。
+AI answers and machine translation may contain errors or omissions; please verify them yourself. When using this software with papers, comply with the copyright and license terms of those papers.
