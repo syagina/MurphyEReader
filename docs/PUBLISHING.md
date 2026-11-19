@@ -1,7 +1,7 @@
 # 发布到 GitHub 前的检查清单
 
-本文档记录 MurphyEReader 的 GitHub 发布流程与检查项。首次公开发布已完成：
-仓库 `syagina/MurphyEReader`，tag `v1.0.0`，发布日期 2026-11-17。后续版本
+本文档记录 MurphyEReader 的 GitHub 发布流程与检查项。首次公开发布于
+2026-11-17 完成（`v1.0.0`），当前版本 `v1.0.1`（2026-11-19）。后续版本
 发布可沿用本清单。
 
 ## 1. 先决定发布范围
@@ -59,10 +59,10 @@ git log -p --all -S 'sk-' -- .
 - [x] `README.md` 已核对：功能、构建命令、数据位置、隐私说明与实际一致。
 - [x] `build/icon.png` 已加入版本控制（README 顶部引用它）。
 - [x] 截图放在 `docs/screenshots/`，且不包含真实密钥、论文正文或个人路径。
-- [x] 版本号已确定为 `1.0.0`，并已同步 `package.json`。
+- [x] 版本号已确定为 `1.0.1`，并已同步 `package.json` 与 `package-lock.json`。
 - [x] 安装包已用新名字/新图标重新构建：`npm run package`。
-- [x] 安装包输出为 `dist/MurphyEReader-1.0.0-setup.exe`，不要提交进 Git。
-- [x] 安装包 SHA-256：`09ab7e88d11661bd8b5d76d89d92b8af32984c92406a01bc3a16f711332fd84a`（未签名，首次运行可能触发 SmartScreen）。
+- [x] 安装包输出为 `dist/MurphyEReader-1.0.1-setup.exe`，不要提交进 Git。
+- [x] 安装包 SHA-256：`9ee29f7146869d374457bd78f2c90724b222509f6c0d5def76def807468f3263`（未签名，首次运行可能触发 SmartScreen）。
 - [x] 当前 `dist/` 下的旧版 `PaperLens-0.1.0-setup.exe` 未发布。
 
 ## 5. GitHub 仓库设置
@@ -71,20 +71,23 @@ git log -p --all -S 'sk-' -- .
 - [x] 已填写仓库描述和 topics（Electron、PDF、AI、translation、paper-reading）。
 - [x] 公开仓库已开启 **Secret Scanning** 与 **Dependabot alerts**。
 - [x] 已开启 Private vulnerability reporting。
-- [x] 安装包未提交进仓库；已在 Releases 中上传 `MurphyEReader-1.0.0-setup.exe`。
+- [x] 安装包未提交进仓库；已在 Releases 中上传 `MurphyEReader-1.0.1-setup.exe`。
 - [x] 发布 Release 时附上 SHA-256 校验值：
 
 ```powershell
-Get-FileHash .\dist\MurphyEReader-1.0.0-setup.exe -Algorithm SHA256
+Get-FileHash .\dist\MurphyEReader-1.0.1-setup.exe -Algorithm SHA256
 ```
 
-## 6. 首次推送记录（已完成）
+## 6. 发布记录（已完成）
 
 - [x] 远程：`https://github.com/syagina/MurphyEReader`
-- [x] 首发提交：`d49303e`；tag：`v1.0.0`
-- [x] Release：https://github.com/syagina/MurphyEReader/releases/tag/v1.0.0
 - [x] 本地发布分支 `impl/paperlens` 映射为远程 `main`，未在本地合并 `main`
 - [x] 安装包未提交进 Git，已作为 Release 附件上传
+
+| 版本 | 日期 | tag | 安装包 SHA-256 |
+|---|---|---|---|
+| 1.0.0 | 2026-11-17 | `v1.0.0` | `09ab7e88d11661bd8b5d76d89d92b8af32984c92406a01bc3a16f711332fd84a` |
+| 1.0.1 | 2026-11-19 | `v1.0.1` | `9ee29f7146869d374457bd78f2c90724b222509f6c0d5def76def807468f3263` |
 
 后续版本发布可沿用：
 
@@ -98,7 +101,7 @@ gh release create vX.Y.Z "dist/MurphyEReader-X.Y.Z-setup.exe" `
 
 ## 7. 如果之后要申请软著
 
-- [x] 为发布的版本打 tag（`v1.0.0`），保留提交历史。
+- [x] 为发布的版本打 tag（`v1.0.0`、`v1.0.1`），保留提交历史。
 - [x] 记录 GitHub 首次公开发布日期：2026-11-17。
 - [ ] 申请版本尽量与某个 Release/tag 对应，避免源码、说明书、安装包不一致。
 - [ ] 注意 2026 年新版申请表关于 AI 使用的诚信承诺，如实申报，不要签署与事实不符的声明。
