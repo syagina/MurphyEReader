@@ -6,6 +6,10 @@
 
 <p align="center">面向论文阅读的 AI 桌面阅读器</p>
 
+<p align="center">
+  <strong>中文</strong> | <a href="README.en.md">English</a>
+</p>
+
 MurphyEReader 是一款 Windows 桌面 PDF 阅读器，围绕论文阅读、翻译、笔记与 AI 问答设计。应用使用 Electron + React + TypeScript 构建，文献与笔记保存在本机 SQLite 数据库中。
 
 > **许可证说明**：本仓库公开源代码供查看，但采用**专有许可**，并非开源软件。未经版权持有人书面许可，不得复制、修改、分发或商用。详见 [LICENSE](LICENSE)。
