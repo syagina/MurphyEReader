@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import type { AiClient, AiMessage } from '@main/ai/client';
+import type { AiClient, AiContentPart, AiMessage } from '@main/ai/client';
 import { abortChat, startChat } from '@main/ai/chat-service';
 import type { ChatDeps } from '@main/ai/chat-service';
 import { openDb } from '@main/db';
@@ -117,6 +117,17 @@ function makeRequest(
     contextMode: 'page',
     ...overrides,
   };
+}
+
+function messageText(message: AiMessage | undefined): string {
+  if (message === undefined) {
+    return '';
+  }
+  return typeof message.content === 'string'
+    ? message.content
+    : message.content
+        .map((part) => (part.type === 'text' ? part.text : part.image_url.url))
+        .join('\n');
 }
 
 function makeDeps(
@@ -253,20 +264,21 @@ describe('startChat streaming', () => {
 
     expect(captured[0].role).toBe('system');
     expect(String(captured[0].content)).toContain('【文献信息】');
-    expect(String(captured[0].content)).toContain('【选中文本】');
-    expect(String(captured[0].content)).toContain('选中的文本');
-    expect(captured.slice(1)).toEqual([
+    expect(String(captured[0].content)).not.toContain('【选中文本】');
+    expect(String(captured[0].content)).not.toContain('选中的文本');
+    expect(captured.slice(1, -1)).toEqual([
       { role: 'user', content: '上一轮问题' },
       { role: 'assistant', content: '上一轮回答' },
-      { role: 'user', content: '这篇论文讲了什么？' },
     ]);
+    const currentText = messageText(captured.at(-1));
+    expect(currentText).toContain('【当前页】第 2 页');
+    expect(currentText).toContain('[第 2 页]\n第二页内容');
+    expect(currentText).toContain('【用户选中的原文（第 2 页）】');
+    expect(currentText).toContain('选中的文本');
+    expect(currentText.endsWith('这篇论文讲了什么？')).toBe(true);
     expect(
-      captured.filter((message) => message.content === '这篇论文讲了什么？'),
+      captured.filter((message) => messageText(message).includes('这篇论文讲了什么？')),
     ).toHaveLength(1);
-    expect(captured.at(-1)).toEqual({
-      role: 'user',
-      content: '这篇论文讲了什么？',
-    });
 
     const userRows = listMessages(db, conversationId).filter(
       (row) => row.role === 'user',
@@ -317,6 +329,52 @@ describe('startChat streaming', () => {
     });
     expect(capturedOpts?.model).toBe('vision-model');
     expect(capturedOpts?.signal?.aborted).toBe(false);
+  });
+
+  it('带图片时 text 部分保留本轮当前页与选文', async () => {
+    const { paper, conversationId } = setupPaper([
+      { pageNo: 1, text: '第一页内容' },
+      { pageNo: 2, text: '第二页内容' },
+    ]);
+    let captured: AiMessage[] = [];
+    const ai: Pick<AiClient, 'streamChat'> = {
+      async streamChat(messages) {
+        captured = messages;
+        return '看图结果';
+      },
+    };
+    const sink = createEventSink();
+    const deps = makeDeps(ai, sink);
+    const donePromise = sink.waitFor('chat:done');
+
+    await startChat(
+      deps,
+      makeRequest(paper, conversationId, {
+        contextMode: 'full',
+        currentPageNo: 2,
+        selectionText: '选中的文本',
+        images: ['data:image/png;base64,AAAA'],
+      }),
+    );
+    await donePromise;
+
+    const last = captured.at(-1);
+    expect(last?.role).toBe('user');
+    expect(Array.isArray(last?.content)).toBe(true);
+    const parts = last?.content as AiContentPart[];
+    expect(parts[0]).toMatchObject({ type: 'text' });
+    if (parts[0].type === 'text') {
+      expect(parts[0].text).toContain('【当前页】第 2 页');
+      expect(parts[0].text).toContain('【用户选中的原文（第 2 页）】');
+      expect(parts[0].text).toContain('选中的文本');
+      expect(parts[0].text.endsWith('这篇论文讲了什么？')).toBe(true);
+    }
+    expect(parts.slice(1)).toEqual([
+      {
+        type: 'image_url',
+        image_url: { url: 'data:image/png;base64,AAAA' },
+      },
+    ]);
   });
 
   it('流式请求失败时 emit chat:error 且不保存 assistant 消息', async () => {
@@ -393,11 +451,14 @@ describe('startChat streaming', () => {
     // The retried question is passed once as the current question and is not
     // replayed from history.
     expect(retryMessages[0].role).toBe('system');
-    expect(retryMessages.slice(1)).toEqual([{ role: 'user', content: question }]);
+    expect(retryMessages).toHaveLength(2);
+    const retryText = messageText(retryMessages[1]);
+    expect(retryText).toContain('【当前页】第 1 页');
+    expect(retryText).toContain('选中的文本');
+    expect(retryText.endsWith(question)).toBe(true);
     expect(
-      retryMessages.filter((message) => message.content === question),
+      retryMessages.filter((message) => messageText(message).includes(question)),
     ).toHaveLength(1);
-    expect(retryMessages.at(-1)).toEqual({ role: 'user', content: question });
   });
 
   it('内容相同但选文不同的追问仍会追加新的用户消息', async () => {

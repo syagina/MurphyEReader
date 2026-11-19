@@ -55,6 +55,43 @@ function renderOutline(nodes: OutlineNode[], depth: number): string[] {
   return lines;
 }
 
+function renderPaperInfo(paper: Paper, currentPageNo?: number): string[] {
+  const lines: string[] = ['【文献信息】'];
+  lines.push(`标题：${paper.title}`);
+  lines.push(`作者：${paper.authors.trim() === '' ? '未知' : paper.authors}`);
+  lines.push(`年份：${paper.year === null ? '未知' : String(paper.year)}`);
+  if (currentPageNo !== undefined) {
+    lines.push(`当前页：${currentPageNo}`);
+  }
+  return lines;
+}
+
+function renderOutlineBlock(paper: Paper): string[] {
+  const lines: string[] = ['', '【目录】'];
+  if (paper.outline.length === 0) {
+    lines.push('（无目录信息）');
+  } else {
+    lines.push(...renderOutline(paper.outline, 0));
+  }
+  return lines;
+}
+
+function renderPageBlocks(pages: PaperPage[]): string[] {
+  if (pages.length === 0) {
+    return ['（无正文）'];
+  }
+  const sorted = [...pages].sort((a, b) => a.pageNo - b.pageNo);
+  const lines: string[] = [];
+  sorted.forEach((page, index) => {
+    if (index > 0) {
+      lines.push('');
+    }
+    lines.push(`[第 ${page.pageNo} 页]`);
+    lines.push(page.text);
+  });
+  return lines;
+}
+
 /**
  * Formats paper metadata, the outline and the given page texts. The selection
  * block is appended whenever a non-empty selection is provided; callers decide
@@ -66,40 +103,83 @@ export function buildPaperContextBlock(
   selectionText?: string,
   currentPageNo?: number,
 ): string {
-  const lines: string[] = ['【文献信息】'];
-  lines.push(`标题：${paper.title}`);
-  lines.push(`作者：${paper.authors.trim() === '' ? '未知' : paper.authors}`);
-  lines.push(`年份：${paper.year === null ? '未知' : String(paper.year)}`);
-  if (currentPageNo !== undefined) {
-    lines.push(`当前页：${currentPageNo}`);
-  }
-
-  lines.push('', '【目录】');
-  if (paper.outline.length === 0) {
-    lines.push('（无目录信息）');
-  } else {
-    lines.push(...renderOutline(paper.outline, 0));
-  }
-
-  lines.push('', '【正文】');
-  if (pages.length === 0) {
-    lines.push('（无正文）');
-  } else {
-    const sorted = [...pages].sort((a, b) => a.pageNo - b.pageNo);
-    sorted.forEach((page, index) => {
-      if (index > 0) {
-        lines.push('');
-      }
-      lines.push(`[第 ${page.pageNo} 页]`);
-      lines.push(page.text);
-    });
-  }
+  const lines = [
+    ...renderPaperInfo(paper, currentPageNo),
+    ...renderOutlineBlock(paper),
+    '',
+    '【正文】',
+    ...renderPageBlocks(pages),
+  ];
 
   if (selectionText !== undefined && selectionText !== '') {
     lines.push('', '【选中文本】', selectionText);
   }
 
   return lines.join('\n');
+}
+
+/**
+ * The paper prefix shared by chat turns. It deliberately excludes the current
+ * page and the selection so that scrolling or selecting text does not change
+ * the cached prefix; those volatile parts are sent in the current user message
+ * instead.
+ */
+export function buildStablePaperContextBlock(
+  paper: Paper,
+  pages: PaperPage[],
+): string {
+  const lines = [...renderPaperInfo(paper), ...renderOutlineBlock(paper)];
+  if (pages.length > 0) {
+    lines.push('', '【正文】', ...renderPageBlocks(pages));
+  }
+  return lines.join('\n');
+}
+
+interface TurnContextInput {
+  selectionText?: string;
+  currentPageNo?: number;
+  pages: PaperPage[];
+  includeCurrentPage?: boolean;
+}
+
+/**
+ * Formats the per-turn context. Everything here is placed after the stable
+ * paper prefix and the conversation history, so changing it only invalidates
+ * the tail of the request.
+ */
+function buildTurnContextBlock({
+  selectionText,
+  currentPageNo,
+  pages,
+  includeCurrentPage = true,
+}: TurnContextInput): string {
+  const lines: string[] = [];
+
+  if (includeCurrentPage && currentPageNo !== undefined) {
+    lines.push(`【当前页】第 ${currentPageNo} 页`);
+  }
+
+  if (pages.length > 0) {
+    if (lines.length > 0) {
+      lines.push('');
+    }
+    lines.push('【本轮附带正文】', ...renderPageBlocks(pages));
+  }
+
+  if (selectionText !== undefined && selectionText !== '') {
+    if (lines.length > 0) {
+      lines.push('');
+    }
+    const pageLabel =
+      currentPageNo === undefined ? '' : `（第 ${currentPageNo} 页）`;
+    lines.push(`【用户选中的原文${pageLabel}】`, selectionText);
+  }
+
+  return lines.join('\n');
+}
+
+function appendTurnContext(turnContext: string, question: string): string {
+  return turnContext === '' ? question : `${turnContext}\n\n${question}`;
 }
 
 function pageBlockText(page: PaperPage): string {
@@ -167,40 +247,13 @@ export function retrieveRelevantPages(
   return selected.sort((a, b) => a.pageNo - b.pageNo);
 }
 
-function composeSystem(
-  paper: Paper,
-  pages: PaperPage[],
-  selectionText: string | undefined,
-  currentPageNo: number | undefined,
-): string {
-  return `${ASK_SYSTEM_PROMPT}\n\n${buildPaperContextBlock(
-    paper,
-    pages,
-    selectionText,
-    currentPageNo,
-  )}`;
-}
-
-/**
- * Conversation-only mode deliberately omits metadata, the outline and page
- * text. A selection is still sent because it is an explicit user attachment,
- * not automatically retrieved paper context.
- */
-function composeConversationSystem(
-  selectionText: string | undefined,
-  currentPageNo: number | undefined,
-): string {
-  if (selectionText === undefined || selectionText === '') {
-    return CONVERSATION_SYSTEM_PROMPT;
-  }
-  const pageLabel =
-    currentPageNo === undefined ? '' : `（第 ${currentPageNo} 页）`;
-  return `${CONVERSATION_SYSTEM_PROMPT}\n\n【用户选中的原文${pageLabel}】\n${selectionText}`;
+function composeStableSystem(paper: Paper, pages: PaperPage[]): string {
+  return `${ASK_SYSTEM_PROMPT}\n\n${buildStablePaperContextBlock(paper, pages)}`;
 }
 
 function buildMessages(
   history: ChatMessage[],
-  question: string,
+  questionContent: string,
   remainingTokens: number,
 ): AiMessage[] {
   const kept: ChatMessage[] = [];
@@ -219,23 +272,29 @@ function buildMessages(
     role: message.role,
     content: message.content,
   }));
-  messages.push({ role: 'user', content: question });
+  messages.push({ role: 'user', content: questionContent });
   return messages;
 }
 
 export function assembleChatContext(input: AssembleInput): AssembleOutput {
   const { paper, pages, history, question, selectionText, contextMode, budgetTokens } = input;
   const sortedPages = [...pages].sort((a, b) => a.pageNo - b.pageNo);
-  const questionTokens = estimateTokens(question);
 
   if (contextMode === 'conversation') {
-    const system = composeConversationSystem(selectionText, input.currentPageNo);
+    const system = CONVERSATION_SYSTEM_PROMPT;
+    const turnContext = buildTurnContextBlock({
+      selectionText,
+      currentPageNo: input.currentPageNo,
+      pages: [],
+      includeCurrentPage: false,
+    });
+    const questionContent = appendTurnContext(turnContext, question);
     return {
       system,
       messages: buildMessages(
         history,
-        question,
-        budgetTokens - estimateTokens(system) - questionTokens,
+        questionContent,
+        budgetTokens - estimateTokens(system) - estimateTokens(questionContent),
       ),
       includedPageNos: [],
       trimmed: false,
@@ -246,51 +305,69 @@ export function assembleChatContext(input: AssembleInput): AssembleOutput {
     const currentPageNo = input.currentPageNo ?? 1;
     const currentPage = sortedPages.find((page) => page.pageNo === currentPageNo);
     const includedPages = currentPage === undefined ? [] : [currentPage];
-    const system = composeSystem(paper, includedPages, selectionText, currentPageNo);
+    const system = composeStableSystem(paper, []);
+    const turnContext = buildTurnContextBlock({
+      selectionText,
+      currentPageNo,
+      pages: includedPages,
+    });
+    const questionContent = appendTurnContext(turnContext, question);
     return {
       system,
       messages: buildMessages(
         history,
-        question,
-        budgetTokens - estimateTokens(system) - questionTokens,
+        questionContent,
+        budgetTokens - estimateTokens(system) - estimateTokens(questionContent),
       ),
       includedPageNos: includedPages.map((page) => page.pageNo),
       trimmed: false,
     };
   }
 
-  const allSystem = composeSystem(paper, sortedPages, selectionText, input.currentPageNo);
-  const allSystemTokens = estimateTokens(allSystem);
+  const fullSystem = composeStableSystem(paper, sortedPages);
+  const baseTurnContext = buildTurnContextBlock({
+    selectionText,
+    currentPageNo: input.currentPageNo,
+    pages: [],
+  });
+  const baseQuestionContent = appendTurnContext(baseTurnContext, question);
+  const fullTokens = estimateTokens(fullSystem) + estimateTokens(baseQuestionContent);
 
-  if (allSystemTokens + questionTokens <= budgetTokens) {
+  if (fullTokens <= budgetTokens) {
     return {
-      system: allSystem,
+      system: fullSystem,
       messages: buildMessages(
         history,
-        question,
-        budgetTokens - allSystemTokens - questionTokens,
+        baseQuestionContent,
+        budgetTokens - fullTokens,
       ),
       includedPageNos: sortedPages.map((page) => page.pageNo),
       trimmed: false,
     };
   }
 
-  const baseSystem = composeSystem(paper, [], selectionText, input.currentPageNo);
-  const pageBudget = budgetTokens - estimateTokens(baseSystem) - questionTokens;
+  const baseSystem = composeStableSystem(paper, []);
+  const pageBudget =
+    budgetTokens - estimateTokens(baseSystem) - estimateTokens(baseQuestionContent);
   const includedPages = retrieveRelevantPages(
     sortedPages,
     question,
     pageBudget,
     input.currentPageNo,
   );
-  const system = composeSystem(paper, includedPages, selectionText, input.currentPageNo);
+  const turnContext = buildTurnContextBlock({
+    selectionText,
+    currentPageNo: input.currentPageNo,
+    pages: includedPages,
+  });
+  const questionContent = appendTurnContext(turnContext, question);
 
   return {
-    system,
+    system: baseSystem,
     messages: buildMessages(
       history,
-      question,
-      budgetTokens - estimateTokens(system) - questionTokens,
+      questionContent,
+      budgetTokens - estimateTokens(baseSystem) - estimateTokens(questionContent),
     ),
     includedPageNos: includedPages.map((page) => page.pageNo),
     trimmed: true,

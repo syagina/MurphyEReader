@@ -75,6 +75,11 @@ function makeNote(overrides: Partial<Note> & Pick<Note, 'id'>): Note {
   };
 }
 
+function lastMessageText(result: ReturnType<typeof assembleChatContext>): string {
+  const content = result.messages.at(-1)?.content;
+  return typeof content === 'string' ? content : '';
+}
+
 describe('estimateTokens', () => {
   it('CJK 字符计 1，其余字符计 1/4，结果向上取整', () => {
     expect(estimateTokens('你好')).toBe(2);
@@ -119,6 +124,93 @@ describe('buildPaperContextBlock', () => {
     expect(block).not.toContain('【选中文本】');
     expect(block).toContain('年份：未知');
     expect(block).not.toContain('当前页：');
+  });
+});
+
+describe('assembleChatContext 稳定前缀', () => {
+  it('仅本页模式翻页时 system 逐字节稳定，当前页与正文只在本轮 user 消息', () => {
+    const paper = makePaper();
+    const pages = makePages(['第一页正文', '第二页正文']);
+
+    const first = assembleChatContext({
+      paper,
+      pages,
+      history: [],
+      question: '第一页问题',
+      currentPageNo: 1,
+      contextMode: 'page',
+      budgetTokens: 10_000,
+    });
+    const second = assembleChatContext({
+      paper,
+      pages,
+      history: [],
+      question: '第二页问题',
+      currentPageNo: 2,
+      contextMode: 'page',
+      budgetTokens: 10_000,
+    });
+
+    expect(first.system).toBe(second.system);
+    expect(first.system).not.toContain('当前页');
+    expect(first.system).not.toContain('第一页正文');
+    expect(lastMessageText(first)).toContain('【当前页】第 1 页');
+    expect(lastMessageText(first)).toContain('[第 1 页]\n第一页正文');
+    expect(lastMessageText(second)).toContain('【当前页】第 2 页');
+    expect(lastMessageText(second)).toContain('[第 2 页]\n第二页正文');
+  });
+
+  it('全文模式翻页时 system 逐字节稳定，当前页只在本轮 user 消息', () => {
+    const paper = makePaper();
+    const pages = makePages(['第一页正文', '第二页正文']);
+
+    const first = assembleChatContext({
+      paper,
+      pages,
+      history: [],
+      question: '第一页问题',
+      currentPageNo: 1,
+      contextMode: 'full',
+      budgetTokens: 10_000,
+    });
+    const second = assembleChatContext({
+      paper,
+      pages,
+      history: [],
+      question: '第二页问题',
+      currentPageNo: 2,
+      contextMode: 'full',
+      budgetTokens: 10_000,
+    });
+
+    expect(first.system).toBe(second.system);
+    expect(first.system).not.toContain('当前页');
+    expect(first.system).toContain('[第 1 页]');
+    expect(first.system).toContain('[第 2 页]');
+    expect(lastMessageText(first)).toContain('【当前页】第 1 页');
+    expect(lastMessageText(second)).toContain('【当前页】第 2 页');
+  });
+
+  it('选文进入本轮 user 消息，不进入 system', () => {
+    const paper = makePaper();
+    const pages = makePages(['第一页正文']);
+
+    const result = assembleChatContext({
+      paper,
+      pages,
+      history: [],
+      question: '这句话什么意思',
+      selectionText: '选中的句子',
+      currentPageNo: 1,
+      contextMode: 'page',
+      budgetTokens: 10_000,
+    });
+
+    expect(result.system).not.toContain('【选中文本】');
+    expect(result.system).not.toContain('选中的句子');
+    expect(lastMessageText(result)).toContain('【用户选中的原文（第 1 页）】');
+    expect(lastMessageText(result)).toContain('选中的句子');
+    expect(lastMessageText(result).endsWith('这句话什么意思')).toBe(true);
   });
 });
 
@@ -173,9 +265,13 @@ describe('assembleChatContext 全文模式', () => {
     expect(result.includedPageNos).toContain(currentPageNo);
     expect(result.includedPageNos).toHaveLength(1);
     expect(result.includedPageNos).not.toEqual([1, 2, 3]);
-    expect(result.system).toContain('[第 2 页]');
-    expect(result.system).toContain('【选中文本】');
-    expect(result.system).toContain(selectionText);
+    expect(result.system).not.toContain('[第 2 页]');
+    expect(result.system).not.toContain('【选中文本】');
+    expect(result.system).not.toContain(selectionText);
+    expect(lastMessageText(result)).toContain('【当前页】第 2 页');
+    expect(lastMessageText(result)).toContain('[第 2 页]');
+    expect(lastMessageText(result)).toContain('【用户选中的原文（第 2 页）】');
+    expect(lastMessageText(result)).toContain(selectionText);
   });
 
   it('页面全部装得下但历史超预算时只裁剪历史，trimmed 仍为 false', () => {
@@ -218,8 +314,10 @@ describe('assembleChatContext 非全文模式', () => {
     });
 
     expect(withCurrent.includedPageNos).toEqual([2]);
-    expect(withCurrent.system).toContain('[第 2 页]\n第二页');
+    expect(withCurrent.system).not.toContain('[第 2 页]');
     expect(withCurrent.system).not.toContain('[第 1 页]');
+    expect(lastMessageText(withCurrent)).toContain('【当前页】第 2 页');
+    expect(lastMessageText(withCurrent)).toContain('[第 2 页]\n第二页');
     expect(withCurrent.trimmed).toBe(false);
 
     const fallback = assembleChatContext({
@@ -232,7 +330,7 @@ describe('assembleChatContext 非全文模式', () => {
     });
 
     expect(fallback.includedPageNos).toEqual([1]);
-    expect(fallback.system).toContain('[第 1 页]\n第一页');
+    expect(lastMessageText(fallback)).toContain('[第 1 页]\n第一页');
     expect(fallback.trimmed).toBe(false);
   });
 });
@@ -281,12 +379,12 @@ describe('assembleChatContext 纯聊天模式', () => {
       budgetTokens: 10_000,
     });
 
-    expect(result.system).toContain(CONVERSATION_SYSTEM_PROMPT);
-    expect(result.system).toContain('【用户选中的原文（第 2 页）】');
-    expect(result.system).toContain('这是选中的句子');
-    expect(result.system).not.toContain(paper.title);
-    expect(result.system).not.toContain('【目录】');
-    expect(result.system).not.toContain('第一页正文');
+    expect(result.system).toBe(CONVERSATION_SYSTEM_PROMPT);
+    expect(result.system).not.toContain('【用户选中的原文');
+    expect(result.system).not.toContain('这是选中的句子');
+    expect(lastMessageText(result)).toContain('【用户选中的原文（第 2 页）】');
+    expect(lastMessageText(result)).toContain('这是选中的句子');
+    expect(lastMessageText(result)).not.toContain('【当前页】');
     expect(result.includedPageNos).toEqual([]);
   });
 });
@@ -303,7 +401,7 @@ describe('assembleChatContext 历史裁剪', () => {
         `${String.fromCharCode(97 + index)}${'中'.repeat(10)}`,
       ),
     );
-    const system = `${ASK_SYSTEM_PROMPT}\n\n${buildPaperContextBlock(paper, pages, undefined, 1)}`;
+    const system = CONVERSATION_SYSTEM_PROMPT;
     const perMessageTokens = estimateTokens(history[0].content);
     const budgetTokens =
       estimateTokens(system) + estimateTokens(question) + 3 * perMessageTokens;
@@ -313,8 +411,7 @@ describe('assembleChatContext 历史裁剪', () => {
       pages,
       history,
       question,
-      currentPageNo: 1,
-      contextMode: 'page',
+      contextMode: 'conversation',
       budgetTokens,
     });
 

@@ -49,8 +49,13 @@ function buildMessages(
   const images = req.images ?? [];
   if (images.length > 0) {
     const lastIndex = messages.length - 1;
+    // The assembled question already carries the volatile per-turn context
+    // (current page, selection, retrieved pages); keep it when images turn the
+    // last message into a content-part array.
+    const lastContent = messages[lastIndex].content;
+    const text = typeof lastContent === 'string' ? lastContent : req.question;
     const content: AiContentPart[] = [
-      { type: 'text', text: req.question },
+      { type: 'text', text },
       ...images.map(
         (url): AiContentPart => ({ type: 'image_url', image_url: { url } }),
       ),

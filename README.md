@@ -82,6 +82,12 @@ build         App icons and packaging resources
 
 ## Changelog
 
+### v1.0.3 (2026-11-19)
+
+- Reorganized Smart Reading context into a stable paper prefix plus per-turn volatile context, so page changes and text selections no longer invalidate the cached full-text prefix on DeepSeek and other OpenAI-compatible APIs.
+- Preserved current-page and selection context when sending images with a question.
+- AI answers now follow the language of the user's question instead of always replying in Chinese, and the requirement to rely only on the supplied paper context is relaxed.
+
 ### v1.0.1 (2026-11-19)
 
 - Added PDF validation: scanned PDFs are detected, and files without a text layer prompt you to OCR them before translation.
@@ -95,7 +101,7 @@ build         App icons and packaging resources
 <details>
 <summary>Show all updates</summary>
 
-The public releases are v1.0.1 and v1.0.0 above; no earlier versions have been published.
+The public releases are v1.0.3, v1.0.1 and v1.0.0 above; no earlier versions have been published.
 
 </details>
 
