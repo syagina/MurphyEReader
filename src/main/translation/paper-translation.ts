@@ -28,6 +28,7 @@ import type {
 import {
   TRANSLATION_ALREADY_CHINESE,
   TRANSLATION_ENGINE_MISSING,
+  TRANSLATION_NO_TEXT_LAYER,
   TRANSLATION_NOT_CONFIGURED,
   TRANSLATION_ORIGINAL_MISSING,
   TRANSLATION_OUTPUT_AMBIGUOUS,
@@ -454,6 +455,13 @@ export class PaperTranslationService {
 
     if (!existsSync(paper.filePathOriginal)) {
       throw new Error(TRANSLATION_ORIGINAL_MISSING);
+    }
+
+    // BabelDOC translates an existing text layer; an image-only scan has
+    // nothing to extract, so fail before spawning the engine and point the
+    // user at OCR instead of the generic output-missing message.
+    if (!paper.hasTextLayer) {
+      throw new Error(TRANSLATION_NO_TEXT_LAYER);
     }
 
     const storedText = getPages(this.deps.db, paper.id)

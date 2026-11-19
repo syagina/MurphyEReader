@@ -46,6 +46,8 @@ export const TRANSLATION_FAILED = '翻译失败，请稍后重试';
 /** Exact user-facing messages of whole-paper BabelDOC translation. */
 export const TRANSLATION_ENGINE_MISSING = '未检测到 BabelDOC，请在设置中安装或指定路径';
 export const TRANSLATION_ALREADY_CHINESE = '这篇看起来已是中文文献';
+export const TRANSLATION_NO_TEXT_LAYER =
+  '该文献是扫描件，没有文字层，无法翻译；请先自行 OCR 生成可搜索 PDF 后重试';
 export const TRANSLATION_ORIGINAL_MISSING = '原文文件不存在';
 export const TRANSLATION_OUTPUT_MISSING = '未找到翻译输出';
 export const TRANSLATION_OUTPUT_AMBIGUOUS = '翻译输出不唯一';

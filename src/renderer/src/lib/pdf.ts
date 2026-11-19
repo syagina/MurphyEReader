@@ -29,6 +29,25 @@ export function clampPage(page: number, pageCount: number): number {
   return Math.min(pageCount, Math.max(1, Math.round(page)));
 }
 
+/**
+ * Ceiling for the rasterization resolution, in device pixels per PDF point.
+ * A page rendered above it would allocate an oversized canvas while adding
+ * little to what the eye can resolve.
+ */
+export const MAX_RENDER_SCALE = 3.5;
+
+/**
+ * Device pixels per PDF point used to rasterize a page. Rendering at up to
+ * twice the display resolution and letting the browser downsample keeps thin
+ * CJK strokes from washing out; at 100% zoom a 10pt glyph is only ~10 device
+ * pixels tall. The boost tapers off at {@link MAX_RENDER_SCALE} and never
+ * drops below the display resolution.
+ */
+export function pdfRenderScale(zoom: number, devicePixelRatio: number): number {
+  const displayScale = zoom * devicePixelRatio;
+  return Math.max(displayScale, Math.min(displayScale * 2, MAX_RENDER_SCALE));
+}
+
 /** Inclusive ascending page numbers around `currentPage`, limited to `radius`. */
 export function buildPageWindow(currentPage: number, pageCount: number, radius = 2): number[] {
   if (pageCount <= 0) {

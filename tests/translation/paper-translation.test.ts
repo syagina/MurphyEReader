@@ -86,6 +86,8 @@ const NOT_CONFIGURED = '请先在设置中配置 AI 接口';
 const TRANSLATING = '该文献正在翻译，暂不能删除、重新定位或绑定译本';
 const BUSY = '请先等待当前任务完成';
 const ALREADY_CHINESE = '这篇看起来已是中文文献';
+const NO_TEXT_LAYER =
+  '该文献是扫描件，没有文字层，无法翻译；请先自行 OCR 生成可搜索 PDF 后重试';
 const OUTPUT_MISSING = '未找到翻译输出';
 const OUTPUT_AMBIGUOUS = '翻译输出不唯一';
 const OUTPUT_INVALID = '翻译输出文件无效';
@@ -484,6 +486,18 @@ describe('PaperTranslationService.start', () => {
 
     await expect(service.start(paper.id)).rejects.toThrow('原文文件不存在');
     expect(jobs.getState().toolTask).toBeNull();
+  });
+
+  it('没有文字层的扫描件以固定中文消息拒绝并要求先 OCR', async () => {
+    const { paper } = await library.importPaper(SAMPLE_SCANNED_PDF);
+    expect(paper.hasTextLayer).toBe(false);
+    const service = makeService();
+
+    await expect(service.start(paper.id)).rejects.toThrow(NO_TEXT_LAYER);
+
+    expect(service.getState()).toBeNull();
+    expect(jobs.getState().toolTask).toBeNull();
+    expect(events).toEqual([]);
   });
 
   it('已有工具任务时原样传播忙碌错误且不创建任务', async () => {

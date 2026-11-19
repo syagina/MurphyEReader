@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
+  MAX_RENDER_SCALE,
   buildPageWindow,
   clampPage,
   findInDocument,
   getSelectionInPage,
+  pdfRenderScale,
 } from '@renderer/lib/pdf';
 
 interface FakeTextItem {
@@ -69,6 +71,28 @@ describe('clampPage', () => {
     expect(clampPage(Number.NaN, 10)).toBe(1);
     expect(clampPage(Number.POSITIVE_INFINITY, 10)).toBe(1);
     expect(clampPage(3, 0)).toBe(1);
+  });
+});
+
+describe('pdfRenderScale', () => {
+  it('低缩放时按两倍分辨率渲染，改善小字号中文的显示清晰度', () => {
+    expect(pdfRenderScale(1, 1)).toBe(2);
+    expect(pdfRenderScale(1.25, 1)).toBe(2.5);
+    expect(pdfRenderScale(1, 1.5)).toBe(3);
+  });
+
+  it('达到上限后不再继续放大画布', () => {
+    expect(pdfRenderScale(2, 1)).toBe(MAX_RENDER_SCALE);
+    // 显示分辨率本身已高于上限时保持原有清晰度，不降采样。
+    expect(pdfRenderScale(3, 1.5)).toBe(4.5);
+  });
+
+  it('任何缩放下都不低于原来的显示分辨率', () => {
+    for (const zoom of [0.5, 1, 1.25, 1.5, 2, 3]) {
+      for (const dpr of [1, 1.25, 1.5, 2]) {
+        expect(pdfRenderScale(zoom, dpr)).toBeGreaterThanOrEqual(zoom * dpr);
+      }
+    }
   });
 });
 

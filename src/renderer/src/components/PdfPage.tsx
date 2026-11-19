@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { TextLayer } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
+import { pdfRenderScale } from '../lib/pdf';
 import { DrawingCaptureLayer, DrawingLayer } from './DrawingLayer';
 import type { PdfDrawingConfig } from './DrawingLayer';
 
@@ -67,7 +68,10 @@ export function PdfPage({
     }
     let cancelled = false;
     const dpr = window.devicePixelRatio || 1;
-    const viewport = page.getViewport({ scale: zoom * dpr });
+    // Rasterize above the display resolution when the page is small on
+    // screen; the browser downsamples the canvas, which keeps thin Chinese
+    // strokes crisp instead of letting them fade into the background.
+    const viewport = page.getViewport({ scale: pdfRenderScale(zoom, dpr) });
     const cssViewport = page.getViewport({ scale: zoom });
     canvas.width = Math.floor(viewport.width);
     canvas.height = Math.floor(viewport.height);
