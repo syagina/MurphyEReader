@@ -1,7 +1,10 @@
 import type { spawn as nodeSpawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { ToolJobRunner } from '@main/tools/job-runner';
+import {
+  ToolJobRunner,
+  withLoopbackProxyBypass,
+} from '@main/tools/job-runner';
 import type { ToolProgressEvent } from '@shared/types';
 
 interface FakeChild extends EventEmitter {
@@ -29,6 +32,36 @@ function spawnReturning(child: FakeChild): typeof nodeSpawn {
 
 afterEach(() => {
   vi.useRealTimers();
+});
+
+describe('withLoopbackProxyBypass', () => {
+  it('keeps existing bypass entries and adds every loopback host', () => {
+    const env = withLoopbackProxyBypass({
+      NO_PROXY: 'internal.example, 127.0.0.1',
+    });
+
+    expect(env.NO_PROXY?.split(',')).toEqual([
+      'internal.example',
+      '127.0.0.1',
+      'localhost',
+      '::1',
+    ]);
+    expect(env.no_proxy).toBe(env.NO_PROXY);
+  });
+
+  it('keeps a lowercase bypass list and deduplicates case-insensitively', () => {
+    const env = withLoopbackProxyBypass({
+      no_proxy: 'corp.example,LOCALHOST',
+    });
+
+    expect(env.NO_PROXY?.split(',')).toEqual([
+      'corp.example',
+      'LOCALHOST',
+      '127.0.0.1',
+      '::1',
+    ]);
+    expect(env.no_proxy).toBe(env.NO_PROXY);
+  });
 });
 
 describe('ToolJobRunner', () => {
@@ -74,6 +107,8 @@ describe('ToolJobRunner', () => {
           PYTHONUNBUFFERED: '1',
           COLUMNS: '200',
           NO_COLOR: '1',
+          NO_PROXY: expect.stringContaining('127.0.0.1'),
+          no_proxy: expect.stringContaining('127.0.0.1'),
         }),
       }),
     );

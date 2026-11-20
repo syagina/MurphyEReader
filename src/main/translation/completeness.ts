@@ -70,8 +70,33 @@ interface Candidate {
   visible: number;
 }
 
+/** Per-page measurements behind one completeness decision. */
+export interface PageCompleteness {
+  pageNo: number;
+  letters: number;
+  /** CJK characters found in the translated output for this page. */
+  cjk: number;
+  /** CJK characters per original Latin letter (0 when the page is missing). */
+  ratio: number;
+  /** Visible translated characters divided by visible original characters. */
+  retained: number;
+  /** The output has no text for this page at all. */
+  missing: boolean;
+  incomplete: boolean;
+}
+
+export interface CompletenessReport {
+  medianRatio: number;
+  threshold: number;
+  /** One entry per original prose page that was judged. */
+  pages: PageCompleteness[];
+  incompletePages: number[];
+}
+
 /**
- * Returns the original page numbers whose Chinese translation is missing.
+ * Judges every prose page and keeps the measurements that explain the verdict.
+ * `findIncompletePages` is the boolean-only view; the full report is logged
+ * when a job refuses to bind so a failure can be diagnosed without guessing.
  *
  * BabelDOC accepts an empty model response as a valid translation: mono output
  * then drops the original paragraph and draws nothing, while dual output keeps
@@ -85,10 +110,10 @@ interface Candidate {
  * Every page is judged, bibliography included, because the whole document is
  * sent to BabelDOC.
  */
-export function findIncompletePages(
+export function inspectCompleteness(
   originalPages: ReadonlyArray<PageText>,
   translatedPages: ReadonlyArray<PageText>,
-): number[] {
+): CompletenessReport {
   const output = new Map(
     translatedPages.map((page) => [page.pageNo, page.text]),
   );
@@ -106,31 +131,54 @@ export function findIncompletePages(
     candidates.push({ pageNo: page.pageNo, letters, visible });
   }
 
-  const ratios: number[] = [];
-  for (const candidate of candidates) {
+  const available = candidates.map((candidate) => {
     const text = output.get(candidate.pageNo);
-    if (text !== undefined) {
-      ratios.push(cjkCount(text) / candidate.letters);
-    }
-  }
+    return {
+      candidate,
+      text,
+      cjk: text === undefined ? 0 : cjkCount(text),
+    };
+  });
+  const ratios = available
+    .filter((entry) => entry.text !== undefined)
+    .map((entry) => entry.cjk / entry.candidate.letters);
   const medianRatio = ratios.length === 0 ? 0 : median(ratios);
   const threshold = Math.max(medianRatio * MIN_MEDIAN_SHARE, MIN_ABSOLUTE_RATIO);
 
-  const incomplete: number[] = [];
-  for (const candidate of candidates) {
-    const text = output.get(candidate.pageNo);
-    if (text === undefined) {
-      incomplete.push(candidate.pageNo);
-      continue;
-    }
-    const ratio = cjkCount(text) / candidate.letters;
-    if (ratio < threshold && ratio < MIN_CLEAR_TRANSLATION_RATIO) {
-      incomplete.push(candidate.pageNo);
-      continue;
-    }
-    if (visibleLength(text) < candidate.visible * MIN_RETAINED_RATIO) {
-      incomplete.push(candidate.pageNo);
-    }
-  }
-  return incomplete;
+  const pages: PageCompleteness[] = available.map(({ candidate, text, cjk }) => {
+    const ratio = cjk / candidate.letters;
+    const retained =
+      text === undefined ? 0 : visibleLength(text) / candidate.visible;
+    const missing = text === undefined;
+    const incomplete =
+      missing ||
+      (ratio < threshold && ratio < MIN_CLEAR_TRANSLATION_RATIO) ||
+      retained < MIN_RETAINED_RATIO;
+    return {
+      pageNo: candidate.pageNo,
+      letters: candidate.letters,
+      cjk,
+      ratio,
+      retained,
+      missing,
+      incomplete,
+    };
+  });
+
+  return {
+    medianRatio,
+    threshold,
+    pages,
+    incompletePages: pages
+      .filter((entry) => entry.incomplete)
+      .map((entry) => entry.pageNo),
+  };
+}
+
+/** Returns the original page numbers whose Chinese translation is missing. */
+export function findIncompletePages(
+  originalPages: ReadonlyArray<PageText>,
+  translatedPages: ReadonlyArray<PageText>,
+): number[] {
+  return inspectCompleteness(originalPages, translatedPages).incompletePages;
 }

@@ -13,20 +13,61 @@ import type { ThrottledEmitter } from '../jobs/throttle';
 
 const DEFAULT_THROTTLE_MS = 250;
 const REDACTED = '[REDACTED]';
+const LOOPBACK_NO_PROXY = ['localhost', '127.0.0.1', '::1'];
+
+/**
+ * Windows can have a system HTTP proxy enabled (Clash and similar tools do
+ * this). Python's httpx reads that registry setting through
+ * `urllib.request.getproxies()` and sends even loopback requests to it, while
+ * it does not reliably apply the registry's `ProxyOverride` bypass list. The
+ * proxy then rejects the request to the app's loopback translation relay with
+ * 502, BabelDOC treats every paragraph as untranslatable and silently falls
+ * back to the original English.
+ *
+ * The child only ever talks to the loopback relay, so loopback must bypass any
+ * proxy. Both spellings are written because httpx accepts either and merges
+ * only one on some platforms.
+ */
+export function withLoopbackProxyBypass(
+  env: NodeJS.ProcessEnv,
+): NodeJS.ProcessEnv {
+  const existing = [env.NO_PROXY, env.no_proxy]
+    .filter((value): value is string => typeof value === 'string')
+    .join(',');
+  const entries: string[] = [];
+  const seen = new Set<string>();
+  for (const raw of existing.split(',')) {
+    const entry = raw.trim();
+    if (entry === '' || seen.has(entry.toLowerCase())) {
+      continue;
+    }
+    seen.add(entry.toLowerCase());
+    entries.push(entry);
+  }
+  for (const host of LOOPBACK_NO_PROXY) {
+    if (!seen.has(host)) {
+      seen.add(host);
+      entries.push(host);
+    }
+  }
+  const value = entries.join(',');
+  return { ...env, NO_PROXY: value, no_proxy: value };
+}
+
 /**
  * BabelDOC is a Python/Rich process. On Chinese Windows its stderr defaults to
  * GBK, while MurphyEReader decodes UTF-8, which produced mojibake paths and
  * `UnicodeEncodeError` tracebacks from Rich's logging handler. Force UTF-8 and
  * a plain, wide output stream so progress lines stay readable.
  */
-const CHILD_ENV: NodeJS.ProcessEnv = {
+const CHILD_ENV: NodeJS.ProcessEnv = withLoopbackProxyBypass({
   ...process.env,
   PYTHONIOENCODING: 'utf-8',
   PYTHONUTF8: '1',
   PYTHONUNBUFFERED: '1',
   COLUMNS: '200',
   NO_COLOR: '1',
-};
+});
 const SPAWN_OPTIONS: SpawnOptions = {
   windowsHide: true,
   stdio: ['ignore', 'pipe', 'pipe'],

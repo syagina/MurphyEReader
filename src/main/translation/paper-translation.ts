@@ -52,7 +52,10 @@ import { extractPdf, getPdfPageCount } from '../pdf/extract';
 import type { PaperLibrary } from '../storage/library-service';
 import { BABELDOC_DUAL_NAME, BABELDOC_MONO_NAME, storageFile } from '../storage/paths';
 import { buildCommandInvocation } from '../tools/babeldoc';
-import { findIncompletePages } from './completeness';
+import {
+  inspectCompleteness,
+  type CompletenessReport,
+} from './completeness';
 import {
   startOpenAiProxy,
   type OpenAiProxyHandle,
@@ -318,6 +321,31 @@ function classifyFailure(lines: string[]): string {
     return ENCRYPTED_PDF_MESSAGE;
   }
   return GENERIC_FAILURE_MESSAGE;
+}
+
+/**
+ * Turns a completeness report into the short Chinese clause shown in the
+ * failed job. The worst page explains why the check rejected the output; the
+ * page list tells the user whether the loss is isolated or systemic.
+ */
+function completenessDetail(report: CompletenessReport): string {
+  const incomplete = report.pages.filter((page) => page.incomplete);
+  if (incomplete.length === 0) {
+    return '';
+  }
+  const worst = [...incomplete].sort((a, b) => a.ratio - b.ratio)[0];
+  const reason = worst.missing
+    ? `第 ${worst.pageNo} 页译文缺失`
+    : `第 ${worst.pageNo} 页中文占比 ${worst.ratio.toFixed(3)}，阈值 ${report.threshold.toFixed(3)}`;
+  if (report.incompletePages.length === 1) {
+    return reason;
+  }
+  const shown = report.incompletePages.slice(0, 5).join('、');
+  const suffix =
+    report.incompletePages.length > 5
+      ? ` 等 ${report.incompletePages.length} 页`
+      : ' 页';
+  return `第 ${shown}${suffix}（${reason}）`;
 }
 
 /** Recursively lists BabelDOC mono/dual outputs below `dir`. */
@@ -594,6 +622,9 @@ export class PaperTranslationService {
   ): Promise<void> {
     const { info } = active;
     let tempDir: string | null = null;
+    // A completeness failure is evidence gathering: keep the temp directory so
+    // the rejected mono/dual PDFs can be inspected after the job ends.
+    let preserveTempDir = false;
     let proxy: OpenAiProxyHandle | null = null;
     let heartbeat: ReturnType<typeof setInterval> | null = null;
     let latestActivity: ProxyActivity | null = null;
@@ -751,19 +782,26 @@ export class PaperTranslationService {
       let primary: 'mono' | 'dual' = 'mono';
       let pageCountTranslated = monoPageCount;
       const monoPages = await extractOutputPages(monoPath);
-      if (
-        monoPages !== null &&
-        findIncompletePages(storedPages, monoPages).length > 0
-      ) {
+      const monoReport =
+        monoPages === null ? null : inspectCompleteness(storedPages, monoPages);
+      if (monoReport !== null && monoReport.incompletePages.length > 0) {
         if (dualPath === null || dualPageCount === null) {
-          throw new Error(TRANSLATION_OUTPUT_INCOMPLETE);
+          const detail = await this.reportIncomplete(info, tempDir, monoReport);
+          preserveTempDir = true;
+          throw new Error(`${TRANSLATION_OUTPUT_INCOMPLETE}（${detail}）`);
         }
         const dualPages = await extractOutputPages(dualPath);
+        const dualReport =
+          dualPages === null
+            ? null
+            : inspectCompleteness(storedPages, dualPages);
         if (
-          dualPages !== null &&
-          findIncompletePages(storedPages, dualPages).length > 0
+          dualReport !== null &&
+          dualReport.incompletePages.length > 0
         ) {
-          throw new Error(TRANSLATION_OUTPUT_INCOMPLETE);
+          const detail = await this.reportIncomplete(info, tempDir, dualReport);
+          preserveTempDir = true;
+          throw new Error(`${TRANSLATION_OUTPUT_INCOMPLETE}（${detail}）`);
         }
         primary = 'dual';
         pageCountTranslated = dualPageCount;
@@ -824,7 +862,7 @@ export class PaperTranslationService {
       if (proxy !== null) {
         await proxy.close().catch(() => undefined);
       }
-      if (tempDir !== null) {
+      if (tempDir !== null && !preserveTempDir) {
         await rm(tempDir, { recursive: true, force: true }).catch(() => undefined);
       }
       try {
@@ -837,6 +875,41 @@ export class PaperTranslationService {
         active.tempDir = null;
       }
     }
+  }
+
+  /**
+   * Surfaces the completeness measurements in the job log before the failed
+   * event replaces the status line, so the card shows which pages were
+   * rejected and where the preserved output can be found.
+   */
+  private async reportIncomplete(
+    info: TranslationJobInfo,
+    tempDir: string | null,
+    report: CompletenessReport,
+  ): Promise<string> {
+    const detail = completenessDetail(report);
+    const suffix =
+      tempDir === null ? '' : `；诊断文件已保留：${tempDir}`;
+    const line = `完整性检查：${detail}${suffix}`;
+    info.line = line;
+    info.logs = [...info.logs, line].slice(-MAX_LOG_LINES);
+    if (tempDir !== null) {
+      // The log panel is capped and disappears with the window; this file is
+      // the durable record of which pages failed and why.
+      await writeFile(
+        join(tempDir, 'completeness.json'),
+        JSON.stringify({ detail, ...report }, null, 2),
+        'utf8',
+      ).catch(() => undefined);
+    }
+    this.emitSafely('translation:progress', {
+      jobId: info.jobId,
+      paperId: info.paperId,
+      percent: info.percent,
+      line,
+      appendLog: true,
+    } satisfies TranslationProgressEvent);
+    return detail;
   }
 
   private finishCanceled(info: TranslationJobInfo): void {

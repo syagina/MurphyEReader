@@ -713,7 +713,17 @@ describe('PaperTranslationService outputs', () => {
     expect(getPaper(db, paper.id)!.filePathTranslated).toBeNull();
     const failed = eventsOf<TranslationFailedEvent>('translation:failed');
     expect(failed).toHaveLength(1);
-    expect(failed[0].message).toBe(TRANSLATION_OUTPUT_INCOMPLETE);
+    expect(failed[0].message).toContain(TRANSLATION_OUTPUT_INCOMPLETE);
+    expect(failed[0].message).toContain('第 1、2 页');
+    const progress = eventsOf<TranslationProgressEvent>('translation:progress');
+    expect(progress.some((event) => event.line.includes('完整性检查'))).toBe(true);
+    const preserved = readdirSync(tempRoot).filter((name) =>
+      name.startsWith('paperlens-babeldoc-'),
+    );
+    expect(preserved).toHaveLength(1);
+    expect(readdirSync(join(tempRoot, preserved[0]))).toContain(
+      'completeness.json',
+    );
   });
 
   it('TOML 值会转义反斜杠、引号并压平控制字符', async () => {

@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { PageText } from '@shared/types';
-import { findIncompletePages } from '@main/translation/completeness';
+import {
+  findIncompletePages,
+  inspectCompleteness,
+} from '@main/translation/completeness';
 
 function page(pageNo: number, text: string): PageText {
   return { pageNo, text };
@@ -8,6 +11,32 @@ function page(pageNo: number, text: string): PageText {
 
 const ENGLISH_PAGE = 'The soil moisture form allows an implicit solution. '.repeat(70);
 const CHINESE_PAGE = '土壤水分形式允许隐式求解，并且能够保持质量守恒。'.repeat(25);
+
+describe('inspectCompleteness', () => {
+  it('reports the threshold and explains each failed page', () => {
+    const original = [
+      page(1, ENGLISH_PAGE),
+      page(2, ENGLISH_PAGE),
+      page(3, ENGLISH_PAGE),
+    ];
+    const translated = [page(1, CHINESE_PAGE), page(2, '译'.repeat(5))];
+
+    const report = inspectCompleteness(original, translated);
+
+    expect(report.incompletePages).toEqual([2, 3]);
+    expect(report.medianRatio).toBeGreaterThan(0);
+    expect(report.threshold).toBeGreaterThan(0);
+
+    const short = report.pages.find((entry) => entry.pageNo === 2)!;
+    expect(short.missing).toBe(false);
+    expect(short.cjk).toBe(5);
+    expect(short.ratio).toBeLessThan(report.threshold);
+
+    const missing = report.pages.find((entry) => entry.pageNo === 3)!;
+    expect(missing.missing).toBe(true);
+    expect(missing.cjk).toBe(0);
+  });
+});
 
 describe('findIncompletePages', () => {
   it('flags a prose page whose Chinese translation is nearly empty', () => {
