@@ -99,14 +99,14 @@ build         App icons and packaging resources
 - Improved translation logs: progress and status are more accurate.
 - Improved translation speed.
 
+<details>
+<summary>Show all updates</summary>
+
 ### v1.0.0 (2026-11-17)
 
 - First public release: library, PDF reading, Smart Reading, selection translation, layout-preserving translation, annotations and notes, appearance, and onboarding.
 
-<details>
-<summary>Show all updates</summary>
-
-The public releases are v1.1.0, v1.0.3, v1.0.1 and v1.0.0 above; no earlier versions have been published.
+No earlier versions have been published.
 
 </details>
 
