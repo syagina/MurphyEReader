@@ -82,6 +82,11 @@ build         App icons and packaging resources
 
 ## Changelog
 
+### v1.1.0 (2026-11-20)
+
+- Fixed whole-paper translation silently falling back to the original English when a Windows system proxy is enabled. BabelDOC's loopback translation relay now bypasses system proxies, so it no longer receives a 502 before reaching the app.
+- Incomplete translations now report the affected page numbers and keep a diagnostic folder containing the completeness report and generated PDFs.
+
 ### v1.0.3 (2026-11-19)
 
 - Reorganized Smart Reading context into a stable paper prefix plus per-turn volatile context, so page changes and text selections no longer invalidate the cached full-text prefix on DeepSeek and other OpenAI-compatible APIs.
@@ -101,7 +106,7 @@ build         App icons and packaging resources
 <details>
 <summary>Show all updates</summary>
 
-The public releases are v1.0.3, v1.0.1 and v1.0.0 above; no earlier versions have been published.
+The public releases are v1.1.0, v1.0.3, v1.0.1 and v1.0.0 above; no earlier versions have been published.
 
 </details>
 
