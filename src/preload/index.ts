@@ -19,8 +19,8 @@ const api: PaperLensApi = {
     attachTranslated: (id) => ipcRenderer.invoke('papers:attachTranslated', id),
     update: (id, patch) => ipcRenderer.invoke('papers:update', id, patch),
     remove: (id) => ipcRenderer.invoke('papers:remove', id),
-    markRead: (id, version, pageNo) =>
-      ipcRenderer.invoke('papers:markRead', id, version, pageNo),
+    markRead: (id, version, pageNo, offset) =>
+      ipcRenderer.invoke('papers:markRead', id, version, pageNo, offset),
     checkFiles: () => ipcRenderer.invoke('papers:checkFiles'),
     relocate: (id, version) => ipcRenderer.invoke('papers:relocate', id, version),
   },

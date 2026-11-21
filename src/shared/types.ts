@@ -40,6 +40,8 @@ export interface Paper {
   filePathTranslated: string | null;
   pageCountOriginal: number;
   pageCountTranslated: number | null;
+  /** The bilingual layout's own page count, when known. */
+  pageCountBilingual: number | null;
   hasTextLayer: boolean;
   outline: OutlineNode[];
   tags: string[];
@@ -48,6 +50,9 @@ export interface Paper {
   fileHash: string | null;
   lastPageOriginal: number;
   lastPageTranslated: number;
+  lastVersion: PdfVersion;
+  lastOffsetOriginal: number;
+  lastOffsetTranslated: number;
   addedAt: number;
   lastReadAt: number | null;
 }
@@ -65,8 +70,6 @@ export interface PaperUpdatePatch {
   authors?: string;
   year?: number | null;
   tags?: string[];
-  lastPageOriginal?: number;
-  lastPageTranslated?: number;
   folderId?: number | null;
 }
 

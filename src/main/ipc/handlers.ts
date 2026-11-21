@@ -396,8 +396,11 @@ export function registerIpcHandlers(deps: HandlerDeps): {
 
   electron.ipcMain.handle(
     'papers:markRead',
-    (_event, id: number, version: PdfVersion, pageNo: number) => {
-      markRead(db, id, version, pageNo);
+    (_event, id: number, version: PdfVersion, pageNo: number, offset: number) => {
+      if (!isPdfVersion(version)) {
+        throw new Error('无效的 PDF 版本');
+      }
+      markRead(db, id, version, pageNo, offset);
     },
   );
 

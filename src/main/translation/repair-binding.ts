@@ -1,7 +1,11 @@
 import { statSync } from 'node:fs';
 import type Database from 'better-sqlite3';
 import { getPages } from '../db/pages';
-import { getPaper, updatePaper } from '../db/papers';
+import {
+  clampReadingPosition,
+  getPaper,
+  updatePaper,
+} from '../db/papers';
 import { extractPdf } from '../pdf/extract';
 import {
   BABELDOC_DUAL_NAME,
@@ -70,9 +74,21 @@ async function evaluate(
     if (findIncompletePages(storedPages, dual.pages).length > 0) {
       return false;
     }
+    const current = getPaper(db, paperId);
+    if (current === null) {
+      return false;
+    }
+    const position = clampReadingPosition(
+      current.lastPageTranslated,
+      current.lastOffsetTranslated,
+      dual.pageCount,
+    );
     updatePaper(db, paperId, {
       filePathTranslated: dualPath,
       pageCountTranslated: dual.pageCount,
+      pageCountBilingual: dual.pageCount,
+      lastPageTranslated: position.page,
+      lastOffsetTranslated: position.offset,
     });
     return true;
   } catch {

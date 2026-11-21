@@ -9,6 +9,7 @@ import {
   filterAnnotations,
   type AnnotationFilter,
 } from '../lib/annotation-marks';
+import { confirm } from '../stores/confirm';
 import { useReaderStore } from '../stores/reader';
 import { useStickyNotesStore } from '../stores/sticky-notes';
 
@@ -79,9 +80,15 @@ export function StickyNotesPanel({
     }
   };
 
-  const handleDeleteDrawing = (note: StickyNote): void => {
-    if (window.confirm('删除这条绘制标注？')) {
-      void remove(note.id);
+  const handleDeleteDrawing = async (note: StickyNote): Promise<void> => {
+    const ok = await confirm({
+      title: '删除绘制',
+      message: '删除这条绘制标注？',
+      confirmLabel: '删除',
+      tone: 'danger',
+    });
+    if (ok) {
+      await remove(note.id);
     }
   };
 

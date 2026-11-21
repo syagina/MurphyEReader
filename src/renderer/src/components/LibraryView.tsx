@@ -12,6 +12,7 @@ import {
   readingProgress,
 } from '../lib/library-view';
 import type { FolderFilter, LibraryFilter, LibrarySort } from '../lib/library-view';
+import { confirm } from '../stores/confirm';
 import { useFoldersStore } from '../stores/folders';
 import { useLibraryStore } from '../stores/library';
 import { useNotesStore } from '../stores/notes';
@@ -323,28 +324,31 @@ export function LibraryView({
     void generateNote('summary', { paperId: paper.id });
   };
 
-  const handleTranslate = (paper: Paper): void => {
+  const handleTranslate = async (paper: Paper): Promise<void> => {
     setOpenMenuId(null);
     setNotice(null);
     setImportError(null);
-    if (
-      isTranslatedBound(paper) &&
-      !window.confirm('该文献已有译本，重新翻译会覆盖当前绑定的译本，确定继续吗？')
-    ) {
-      return;
-    }
-    void (async () => {
-      setError(null);
-      try {
-        await startTranslation(paper.id);
-      } catch (failure) {
-        const message = errorMessage(failure);
-        setError(message);
-        if (message === TRANSLATION_ENGINE_MISSING) {
-          onOpenEngineSettings?.();
-        }
+    if (isTranslatedBound(paper)) {
+      const ok = await confirm({
+        title: '替换译本',
+        message: '该文献已有译本，重新翻译会覆盖当前绑定的译本，确定继续吗？',
+        confirmLabel: '继续翻译',
+        tone: 'danger',
+      });
+      if (!ok) {
+        return;
       }
-    })();
+    }
+    setError(null);
+    try {
+      await startTranslation(paper.id);
+    } catch (failure) {
+      const message = errorMessage(failure);
+      setError(message);
+      if (message === TRANSLATION_ENGINE_MISSING) {
+        onOpenEngineSettings?.();
+      }
+    }
   };
 
   const handleAttach = (paper: Paper): void => {
@@ -374,12 +378,18 @@ export function LibraryView({
     void runAction(() => revealPaper(paper.id));
   };
 
-  const handleDelete = (paper: Paper): void => {
+  const handleDelete = async (paper: Paper): Promise<void> => {
     setOpenMenuId(null);
-    if (!window.confirm(`确定删除文献「${paper.title}」？此操作不可恢复。`)) {
+    const ok = await confirm({
+      title: '删除文献',
+      message: `确定删除文献「${paper.title}」？此操作不可恢复。`,
+      confirmLabel: '删除',
+      tone: 'danger',
+    });
+    if (!ok) {
       return;
     }
-    void runAction(() => removePaper(paper.id));
+    await runAction(() => removePaper(paper.id));
   };
 
   const startEdit = (paper: Paper): void => {

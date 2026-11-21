@@ -48,7 +48,12 @@ export interface PaperLensApi {
     attachTranslated(id: number): Promise<Paper | null>;
     update(id: number, patch: PaperUpdatePatch): Promise<Paper>;
     remove(id: number): Promise<void>;
-    markRead(id: number, version: PdfVersion, pageNo: number): Promise<void>;
+    markRead(
+      id: number,
+      version: PdfVersion,
+      pageNo: number,
+      offset: number,
+    ): Promise<void>;
     checkFiles(): Promise<PaperFileStatus[]>;
     relocate(id: number, version: 'original' | 'translated'): Promise<Paper | null>;
   };

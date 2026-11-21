@@ -138,7 +138,7 @@ describe('v2 → v4 迁移', () => {
 
     const db = openDb(dbPath);
 
-    expect(db.pragma('user_version', { simple: true })).toBe(4);
+    expect(db.pragma('user_version', { simple: true })).toBe(5);
     expect(getPaper(db, 1)).toMatchObject({
       title: 'v2 文献',
       authors: '李四',
@@ -175,7 +175,7 @@ describe('v2 → v4 迁移', () => {
 
     const second = openDb(dbPath);
 
-    expect(second.pragma('user_version', { simple: true })).toBe(4);
+    expect(second.pragma('user_version', { simple: true })).toBe(5);
     expect(getPaper(second, 1)?.title).toBe('v2 文献');
     expect(listNotes(second, 1)).toHaveLength(1);
     expect(
@@ -191,7 +191,7 @@ describe('v2 → v4 迁移', () => {
   it('全新数据库直接以 v4 初始化', () => {
     const db = openDb(dbPath);
 
-    expect(db.pragma('user_version', { simple: true })).toBe(4);
+    expect(db.pragma('user_version', { simple: true })).toBe(5);
     expect(objectNames(db, 'table')).toContain('sticky_notes');
     db.close();
   });
@@ -203,7 +203,7 @@ describe('v3 → v4 迁移', () => {
 
     const db = openDb(dbPath);
 
-    expect(db.pragma('user_version', { simple: true })).toBe(4);
+    expect(db.pragma('user_version', { simple: true })).toBe(5);
 
     const columns = db
       .prepare("PRAGMA table_info('sticky_notes')")

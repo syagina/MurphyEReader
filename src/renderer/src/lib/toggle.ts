@@ -1,31 +1,29 @@
 import type { PdfVersion } from '@shared/types';
-import { clampPage } from './pdf';
+import { mapReadingPosition, positionAt } from './reading-position';
+import type { ReadingPosition } from './reading-position';
 
 /**
- * Picks the page to show after switching between the original PDF and its
- * translation. When both versions have the same page count the two views are
- * assumed aligned, so the current page carries over; otherwise each version
- * remembers its own last page. Switching between the two translated layouts
- * always carries the current page because they describe the same document.
+ * Resolves the position to show after switching versions. The live reading
+ * progress is mapped onto the target layout's page count; a version's own
+ * historical page is deliberately not consulted.
  */
-export function resolveToggleTargetPage(input: {
+export function resolveTogglePosition(input: {
   from: PdfVersion;
   to: PdfVersion;
-  currentPage: number;
-  lastPageOriginal: number;
-  lastPageTranslated: number;
-  pageCountOriginal: number;
-  pageCountTranslated: number | null;
-}): number {
-  const targetCount =
-    input.to === 'original' ? input.pageCountOriginal : (input.pageCountTranslated ?? 0);
-  const samePageCounts =
-    input.pageCountTranslated !== null && input.pageCountTranslated === input.pageCountOriginal;
-  const betweenTranslations = input.from !== 'original' && input.to !== 'original';
-  if (input.from === input.to || samePageCounts || betweenTranslations) {
-    return clampPage(input.currentPage, targetCount);
+  position: ReadingPosition;
+  fromPageCount: number;
+  toPageCount: number;
+}): ReadingPosition {
+  if (input.from === input.to) {
+    return positionAt(
+      input.position.page,
+      input.position.offset,
+      input.toPageCount,
+    );
   }
-  const targetLastPage =
-    input.to === 'original' ? input.lastPageOriginal : input.lastPageTranslated;
-  return clampPage(targetLastPage || 1, targetCount);
+  return mapReadingPosition(
+    input.position,
+    input.fromPageCount,
+    input.toPageCount,
+  );
 }

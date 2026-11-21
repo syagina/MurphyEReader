@@ -46,7 +46,11 @@ import {
 } from '@shared/translation';
 import type { AiConfig } from '../ai/client';
 import { getPages } from '../db/pages';
-import { getPaper, updatePaper } from '../db/papers';
+import {
+  clampReadingPosition,
+  getPaper,
+  updatePaper,
+} from '../db/papers';
 import type { JobRegistry } from '../jobs/job-registry';
 import { extractPdf, getPdfPageCount } from '../pdf/extract';
 import type { PaperLibrary } from '../storage/library-service';
@@ -821,6 +825,7 @@ export class PaperTranslationService {
         dualPath,
         primary,
         pageCountTranslated,
+        dualPageCount,
         () => active.cancelRequested,
       );
       if (updated === null) {
@@ -966,6 +971,7 @@ export class PaperTranslationService {
     dualPath: string | null,
     primary: 'mono' | 'dual',
     pageCountTranslated: number,
+    pageCountBilingual: number | null,
     shouldCancel: () => boolean,
   ): Promise<Paper | null> {
     if (paper.storageDir === null) {
@@ -1046,13 +1052,17 @@ export class PaperTranslationService {
       }
 
       const current = getPaper(this.deps.db, paper.id) ?? paper;
+      const position = clampReadingPosition(
+        current.lastPageTranslated,
+        current.lastOffsetTranslated,
+        pageCountTranslated,
+      );
       const updated = updatePaper(this.deps.db, paper.id, {
         filePathTranslated: finalPrimary,
         pageCountTranslated,
-        lastPageTranslated: Math.min(
-          Math.max(1, current.lastPageTranslated),
-          pageCountTranslated,
-        ),
+        pageCountBilingual,
+        lastPageTranslated: position.page,
+        lastOffsetTranslated: position.offset,
       });
 
       if (monoBackedUp) {

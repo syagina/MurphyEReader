@@ -82,6 +82,12 @@ build         App icons and packaging resources
 
 ## Changelog
 
+### v1.2.0 (2026-11-21)
+
+- Restores the last layout, page, and in-page position; switching layouts keeps your place.
+- Caches parsed PDFs and prefetches other layouts while idle for faster switching.
+- Fixes the Smart Reading composer losing keyboard/IME input after deleting a conversation.
+
 ### v1.1.0 (2026-11-20)
 
 - Fixed whole-paper translation silently falling back to the original English when a Windows system proxy is enabled. BabelDOC's loopback translation relay now bypasses system proxies, so it no longer receives a 502 before reaching the app.
@@ -93,14 +99,14 @@ build         App icons and packaging resources
 - Preserved current-page and selection context when sending images with a question.
 - AI answers now follow the language of the user's question instead of always replying in Chinese, and the requirement to rely only on the supplied paper context is relaxed.
 
+<details>
+<summary>Show all updates</summary>
+
 ### v1.0.1 (2026-11-19)
 
 - Added PDF validation: scanned PDFs are detected, and files without a text layer prompt you to OCR them before translation.
 - Improved translation logs: progress and status are more accurate.
 - Improved translation speed.
-
-<details>
-<summary>Show all updates</summary>
 
 ### v1.0.0 (2026-11-17)
 

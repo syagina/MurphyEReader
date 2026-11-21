@@ -15,6 +15,7 @@ import {
 import { errorMessage } from '../lib/errors';
 import { readAssistantSelection } from '../lib/selection-markdown';
 import { useChatStore } from '../stores/chat';
+import { confirm } from '../stores/confirm';
 import { useReaderStore } from '../stores/reader';
 import type { ReaderSelection } from '../stores/reader';
 import { useStickyNotesStore } from '../stores/sticky-notes';
@@ -358,17 +359,26 @@ export function ChatPanel({
     });
   };
 
-  const handleDelete = (): void => {
+  const handleDelete = async (): Promise<void> => {
     const active = conversations.find(
       (conversation) => conversation.id === activeConversationId,
     );
     if (active === undefined) {
       return;
     }
-    if (!window.confirm(`确定删除对话「${active.title}」？此操作不可恢复。`)) {
+    const ok = await confirm({
+      title: '删除对话',
+      message: `确定删除对话「${active.title}」？此操作不可恢复。`,
+      confirmLabel: '删除',
+      tone: 'danger',
+    });
+    if (!ok) {
       return;
     }
-    void runAction(() => removeConversation(active.id));
+    await runAction(() => removeConversation(active.id));
+    // The dialog restores focus to its opener, but the delete button may be
+    // gone with the conversation; put the caret back in the composer directly.
+    window.requestAnimationFrame(() => textareaRef.current?.focus());
   };
 
   return (

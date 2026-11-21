@@ -21,6 +21,7 @@ import { sha256File } from '@main/storage/hash';
 import { PaperLibrary } from '@main/storage/library-service';
 import type { PaperLibraryDeps } from '@main/storage/library-service';
 import {
+  BABELDOC_DUAL_NAME,
   CUSTOM_TRANSLATED_NAME,
   ORIGINAL_PDF_NAME,
   canonicalStorageDir,
@@ -140,6 +141,13 @@ describe('PaperLibrary.importPaper', () => {
     const library = makeLibrary();
     const imported = await library.importPaper(SAMPLE_TEXT_PDF);
     await library.attachTranslated(imported.paper.id, SAMPLE_SCANNED_PDF);
+    updatePaper(db, imported.paper.id, {
+      pageCountBilingual: 1,
+      lastPageTranslated: 1,
+      lastOffsetTranslated: 0.7,
+      lastOffsetOriginal: 0.4,
+      lastVersion: 'bilingual',
+    });
     const bound = getPaper(db, imported.paper.id)!;
     expect(bound.filePathTranslated).not.toBeNull();
     rmSync(join(root, bound.storageDir!), { recursive: true, force: true });
@@ -149,7 +157,11 @@ describe('PaperLibrary.importPaper', () => {
     expect(restored.restored).toBe(true);
     expect(restored.paper.filePathTranslated).toBeNull();
     expect(restored.paper.pageCountTranslated).toBeNull();
+    expect(restored.paper.pageCountBilingual).toBeNull();
     expect(restored.paper.lastPageTranslated).toBe(1);
+    expect(restored.paper.lastOffsetTranslated).toBe(0);
+    expect(restored.paper.lastVersion).toBe('original');
+    expect(restored.paper.lastOffsetOriginal).toBe(0.4);
     expect(getPages(db, imported.paper.id)).toHaveLength(2);
   });
 
@@ -294,6 +306,12 @@ describe('PaperLibrary.attachTranslated', () => {
     const library = makeLibrary();
     const imported = await library.importPaper(SAMPLE_TEXT_PDF);
     const pagesBefore = getPages(db, imported.paper.id);
+    updatePaper(db, imported.paper.id, {
+      pageCountBilingual: 5,
+      lastPageTranslated: 1,
+      lastOffsetTranslated: 0.6,
+      lastVersion: 'bilingual',
+    });
 
     const attached = await library.attachTranslated(imported.paper.id, SAMPLE_SCANNED_PDF);
 
@@ -301,6 +319,10 @@ describe('PaperLibrary.attachTranslated', () => {
       storageFile(root, attached.storageDir!, CUSTOM_TRANSLATED_NAME),
     );
     expect(attached.pageCountTranslated).toBe(1);
+    expect(attached.pageCountBilingual).toBeNull();
+    expect(attached.lastPageTranslated).toBe(1);
+    expect(attached.lastOffsetTranslated).toBe(0.6);
+    expect(attached.lastVersion).toBe('bilingual');
     expect(attached.filePathOriginal).toBe(imported.paper.filePathOriginal);
     expect(existsSync(attached.filePathTranslated!)).toBe(true);
     expect(existsSync(SAMPLE_SCANNED_PDF)).toBe(true);
@@ -388,7 +410,24 @@ describe('PaperLibrary.attachTranslated', () => {
     expect(attached.storageDir).toBeNull();
     expect(attached.filePathTranslated).toBe(externalTranslation);
     expect(attached.pageCountTranslated).toBe(1);
+    expect(attached.pageCountBilingual).toBeNull();
     expect(getPaper(db, paper.id)?.storageDir).toBeNull();
+  });
+
+  it('未托管的外部规范对照版同时记录双语页数', async () => {
+    const dualTranslation = join(tempDir, BABELDOC_DUAL_NAME);
+    copyFileSync(SAMPLE_SCANNED_PDF, dualTranslation);
+    const paper = createPaper(
+      db,
+      makeInput({ filePathOriginal: join(tempDir, 'missing.pdf') }),
+    );
+    const library = makeLibrary();
+
+    const attached = await library.attachTranslated(paper.id, dualTranslation);
+
+    expect(attached.storageDir).toBeNull();
+    expect(attached.pageCountTranslated).toBe(1);
+    expect(attached.pageCountBilingual).toBe(1);
   });
 
   it('无效的托管 storage_dir 拒绝绑定', async () => {
@@ -430,12 +469,19 @@ describe('PaperLibrary.relocate', () => {
   it('重新定位原文会复制进托管文件夹并更新哈希与页记录', async () => {
     const library = makeLibrary();
     const imported = await library.importPaper(SAMPLE_SCANNED_PDF);
+    updatePaper(db, imported.paper.id, {
+      lastPageOriginal: 99,
+      lastOffsetOriginal: 0.6,
+    });
     const target = storageFile(root, imported.paper.storageDir!, ORIGINAL_PDF_NAME);
 
     const relocated = await library.relocate(imported.paper.id, 'original', SAMPLE_TEXT_PDF);
 
     expect(relocated.filePathOriginal).toBe(target);
     expect(relocated.pageCountOriginal).toBe(2);
+    expect(relocated.lastPageOriginal).toBe(2);
+    expect(relocated.lastOffsetOriginal).toBe(0);
+    expect(relocated.lastVersion).toBe('original');
     expect(relocated.fileHash).toMatch(/^[0-9a-f]{64}$/);
     expect(readFileSync(target).equals(readFileSync(SAMPLE_TEXT_PDF))).toBe(true);
     expect(getPages(db, imported.paper.id)).toHaveLength(2);
@@ -445,6 +491,12 @@ describe('PaperLibrary.relocate', () => {
   it('重新定位译本会复制为 translated.custom.pdf', async () => {
     const library = makeLibrary();
     const imported = await library.importPaper(SAMPLE_TEXT_PDF);
+    updatePaper(db, imported.paper.id, {
+      pageCountBilingual: 5,
+      lastPageTranslated: 5,
+      lastOffsetTranslated: 0.4,
+      lastVersion: 'translated',
+    });
 
     const relocated = await library.relocate(imported.paper.id, 'translated', SAMPLE_SCANNED_PDF);
 
@@ -452,6 +504,10 @@ describe('PaperLibrary.relocate', () => {
       storageFile(root, relocated.storageDir!, CUSTOM_TRANSLATED_NAME),
     );
     expect(relocated.pageCountTranslated).toBe(1);
+    expect(relocated.pageCountBilingual).toBeNull();
+    expect(relocated.lastPageTranslated).toBe(1);
+    expect(relocated.lastOffsetTranslated).toBe(0);
+    expect(relocated.lastVersion).toBe('translated');
     expect(existsSync(relocated.filePathTranslated!)).toBe(true);
   });
 

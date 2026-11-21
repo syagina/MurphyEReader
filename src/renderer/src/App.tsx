@@ -14,6 +14,7 @@ import {
 } from '@shared/ai-panel';
 import type { Paper, SearchResult, StickyNote } from '@shared/types';
 import { ChatPanel } from './components/ChatPanel';
+import { ConfirmDialog } from './components/ConfirmDialog';
 import { LibraryView } from './components/LibraryView';
 import { NotesPanel } from './components/NotesPanel';
 import { Onboarding } from './components/Onboarding';
@@ -1305,6 +1306,8 @@ export default function App(): React.JSX.Element {
       )}
 
       <TranslationStatusCard onOpenPaper={handleOpenPaper} />
+
+      <ConfirmDialog />
 
       {settingsOpen && (
         <SettingsDialog

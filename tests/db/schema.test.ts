@@ -39,7 +39,7 @@ describe('openDb 初始化数据库', () => {
   });
 
   it('将 PRAGMA user_version 设为 SCHEMA_VERSION', () => {
-    expect(SCHEMA_VERSION).toBe(4);
+    expect(SCHEMA_VERSION).toBe(5);
     expect(db.pragma('user_version', { simple: true })).toBe(SCHEMA_VERSION);
   });
 
@@ -48,6 +48,23 @@ describe('openDb 初始化数据库', () => {
 
     expect(columns.map((column) => column.name)).toEqual(
       expect.arrayContaining(['folder_id', 'file_hash', 'storage_dir']),
+    );
+  });
+
+  it('papers 表包含 v5 阅读位置字段', () => {
+    const columns = db.prepare("PRAGMA table_info('papers')").all() as {
+      name: string;
+      dflt_value: string | null;
+      notnull: number;
+    }[];
+
+    expect(columns).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: 'last_version', dflt_value: "'original'", notnull: 1 }),
+        expect.objectContaining({ name: 'last_offset_original', dflt_value: '0', notnull: 1 }),
+        expect.objectContaining({ name: 'last_offset_translated', dflt_value: '0', notnull: 1 }),
+        expect.objectContaining({ name: 'page_count_bilingual', dflt_value: null, notnull: 0 }),
+      ]),
     );
   });
 

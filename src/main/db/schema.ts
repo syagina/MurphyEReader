@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 
-export const SCHEMA_VERSION = 4;
+export const SCHEMA_VERSION = 5;
 
 export const MIGRATION_V1 = `
 CREATE TABLE papers (
@@ -83,6 +83,13 @@ ALTER TABLE sticky_notes ADD COLUMN color TEXT;
 ALTER TABLE sticky_notes ADD COLUMN pin_json TEXT;
 ALTER TABLE sticky_notes ADD COLUMN popup_json TEXT;
 ALTER TABLE sticky_notes ADD COLUMN drawing_json TEXT;
+`;
+
+export const MIGRATION_V5 = `
+ALTER TABLE papers ADD COLUMN last_version TEXT NOT NULL DEFAULT 'original';
+ALTER TABLE papers ADD COLUMN last_offset_original REAL NOT NULL DEFAULT 0;
+ALTER TABLE papers ADD COLUMN last_offset_translated REAL NOT NULL DEFAULT 0;
+ALTER TABLE papers ADD COLUMN page_count_bilingual INTEGER;
 `;
 
 interface FtsTable {
@@ -188,6 +195,10 @@ export function migrate(db: Database.Database): void {
     if (userVersion < 4) {
       db.exec(MIGRATION_V4);
       db.pragma('user_version = 4');
+    }
+    if (userVersion < 5) {
+      db.exec(MIGRATION_V5);
+      db.pragma('user_version = 5');
     }
     ensureFtsObjects(db);
   })();

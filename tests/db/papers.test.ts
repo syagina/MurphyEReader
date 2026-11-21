@@ -75,11 +75,15 @@ describe('createPaper', () => {
       filePathTranslated: null,
       pageCountOriginal: 120,
       pageCountTranslated: null,
+      pageCountBilingual: null,
       hasTextLayer: true,
       outline: sampleOutline,
       tags: [],
       lastPageOriginal: 1,
       lastPageTranslated: 1,
+      lastVersion: 'original',
+      lastOffsetOriginal: 0,
+      lastOffsetTranslated: 0,
       lastReadAt: null,
       folderId: null,
       storageDir: null,
@@ -277,31 +281,64 @@ describe('deletePaper', () => {
 });
 
 describe('markRead', () => {
-  it('markRead translated 更新译本页码与 lastReadAt', () => {
+  it('markRead translated 更新译本页码、页内偏移与 lastReadAt', () => {
     const before = Date.now();
     const { id } = createPaper(db, makeInput());
 
-    markRead(db, id, 'translated', 7);
+    markRead(db, id, 'translated', 7, 0.25);
 
     const paper = getPaper(db, id);
     expect(paper?.lastPageTranslated).toBe(7);
+    expect(paper?.lastOffsetTranslated).toBe(0.25);
+    expect(paper?.lastVersion).toBe('translated');
     expect(paper?.lastPageOriginal).toBe(1);
+    expect(paper?.lastOffsetOriginal).toBe(0);
     expect(paper?.lastReadAt).not.toBeNull();
     expect(paper?.lastReadAt).toBeGreaterThanOrEqual(before);
   });
 
-  it('markRead original 只更新原文页码', () => {
+  it('markRead bilingual 与译本共享位置但记录当前版本', () => {
     const { id } = createPaper(db, makeInput());
 
-    markRead(db, id, 'original', 3);
+    markRead(db, id, 'bilingual', 4, 0.5);
+
+    const paper = getPaper(db, id);
+    expect(paper?.lastPageTranslated).toBe(4);
+    expect(paper?.lastOffsetTranslated).toBe(0.5);
+    expect(paper?.lastVersion).toBe('bilingual');
+    expect(paper?.lastPageOriginal).toBe(1);
+  });
+
+  it('markRead original 只更新原文页码与偏移', () => {
+    const { id } = createPaper(db, makeInput());
+
+    markRead(db, id, 'original', 3, 0.5);
 
     const paper = getPaper(db, id);
     expect(paper?.lastPageOriginal).toBe(3);
+    expect(paper?.lastOffsetOriginal).toBe(0.5);
+    expect(paper?.lastVersion).toBe('original');
     expect(paper?.lastPageTranslated).toBe(1);
+    expect(paper?.lastOffsetTranslated).toBe(0);
     expect(paper?.lastReadAt).not.toBeNull();
   });
 
+  it('markRead 钳制页码与偏移到合法范围', () => {
+    const { id } = createPaper(db, makeInput());
+
+    markRead(db, id, 'translated', 0, 1.5);
+
+    const paper = getPaper(db, id);
+    expect(paper?.lastPageTranslated).toBe(1);
+    expect(paper?.lastOffsetTranslated).toBe(0.999999);
+
+    markRead(db, id, 'original', Number.NaN, Number.NaN);
+    const afterNaN = getPaper(db, id);
+    expect(afterNaN?.lastPageOriginal).toBe(1);
+    expect(afterNaN?.lastOffsetOriginal).toBe(0);
+  });
+
   it('markRead 不存在的 id 不抛错', () => {
-    expect(() => markRead(db, 999, 'original', 2)).not.toThrow();
+    expect(() => markRead(db, 999, 'original', 2, 0.1)).not.toThrow();
   });
 });

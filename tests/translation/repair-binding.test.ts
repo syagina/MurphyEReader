@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { openDb } from '@main/db';
-import { createPaper, getPaper } from '@main/db/papers';
+import { createPaper, getPaper, updatePaper } from '@main/db/papers';
 import { replacePages } from '@main/db/pages';
 import type { ExtractedPdf } from '@main/pdf/extract';
 import { extractPdf } from '@main/pdf/extract';
@@ -93,12 +93,21 @@ describe('repairManagedTranslation', () => {
     mockedExtract.mockImplementation(async (filePath) =>
       filePath === monoPath ? output(incompleteMono) : output(completeDual, 7),
     );
+    updatePaper(db, paper.id, {
+      lastPageTranslated: 99,
+      lastOffsetTranslated: 0.5,
+      lastVersion: 'bilingual',
+    });
 
     await expect(repairManagedTranslation(db, paper.id, root)).resolves.toBe(true);
 
     const updated = getPaper(db, paper.id)!;
     expect(updated.filePathTranslated).toBe(dualPath);
     expect(updated.pageCountTranslated).toBe(7);
+    expect(updated.pageCountBilingual).toBe(7);
+    expect(updated.lastPageTranslated).toBe(7);
+    expect(updated.lastOffsetTranslated).toBe(0);
+    expect(updated.lastVersion).toBe('bilingual');
   });
 
   it('mono 输出完整时保持原绑定', async () => {

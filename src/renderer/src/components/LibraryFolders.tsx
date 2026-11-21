@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import type { Folder } from '@shared/types';
 import { countByFolder } from '../lib/library-view';
 import type { FolderFilter } from '../lib/library-view';
+import { confirm } from '../stores/confirm';
 import { useFoldersStore } from '../stores/folders';
 import { useLibraryStore } from '../stores/library';
 
@@ -80,7 +81,13 @@ export function LibraryFolders({
 
   const handleDelete = async (folder: Folder): Promise<void> => {
     const count = counts.byId[folder.id] ?? 0;
-    if (!window.confirm(`文件夹内的 ${count} 篇文献会移到「未分类」，不会删除文件。`)) {
+    const ok = await confirm({
+      title: '删除文件夹',
+      message: `文件夹内的 ${count} 篇文献会移到「未分类」，不会删除文件。`,
+      confirmLabel: '删除',
+      tone: 'danger',
+    });
+    if (!ok) {
       return;
     }
     if (saving) {

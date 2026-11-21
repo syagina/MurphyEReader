@@ -11,6 +11,7 @@ import type {
 } from '@shared/types';
 import { replacePages } from '../db/pages';
 import {
+  clampReadingPosition,
   createPaper,
   deletePaper,
   findPaperByHash,
@@ -25,6 +26,7 @@ import { adoptUnmanagedPaper } from './adopt';
 import { collectPdfFiles, runFolderImport } from './folder-import';
 import { sha256File } from './hash';
 import {
+  BABELDOC_DUAL_NAME,
   CUSTOM_TRANSLATED_NAME,
   ORIGINAL_PDF_NAME,
   canonicalStorageDir,
@@ -53,6 +55,22 @@ const FOLDER_IMPORT_PROGRESS_INTERVAL_MS = 200;
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+/**
+ * A managed copy is always renamed `translated.custom.pdf`, so only an
+ * unmanaged path that keeps the canonical dual filename can describe a
+ * bilingual layout.
+ */
+function bilingualCountFor(
+  paper: Paper,
+  translatedPath: string,
+  pageCount: number,
+): number | null {
+  return paper.storageDir === null &&
+    basename(translatedPath) === BABELDOC_DUAL_NAME
+    ? pageCount
+    : null;
 }
 
 function isEnoent(error: unknown): boolean {
@@ -273,6 +291,11 @@ export class PaperLibrary {
     const translationMissing =
       duplicate.filePathTranslated === null ||
       !existsSync(duplicate.filePathTranslated);
+    const originalPosition = clampReadingPosition(
+      duplicate.lastPageOriginal,
+      duplicate.lastOffsetOriginal,
+      extracted.pageCount,
+    );
     const updated = updatePaper(this.db, duplicate.id, {
       storageDir,
       filePathOriginal: target,
@@ -280,12 +303,16 @@ export class PaperLibrary {
       hasTextLayer: extracted.hasTextLayer,
       outline: extracted.outline,
       fileHash: hash,
-      lastPageOriginal: Math.min(duplicate.lastPageOriginal, extracted.pageCount),
+      lastPageOriginal: originalPosition.page,
+      lastOffsetOriginal: originalPosition.offset,
       ...(translationMissing
         ? {
             filePathTranslated: null,
             pageCountTranslated: null,
+            pageCountBilingual: null,
             lastPageTranslated: 1,
+            lastOffsetTranslated: 0,
+            lastVersion: 'original' as const,
           }
         : {}),
     });
@@ -300,6 +327,11 @@ export class PaperLibrary {
       const paper = this.requirePaper(paperId);
       const root = this.getRoot();
       const pageCountTranslated = await this.pageCount(sourcePath);
+      const position = clampReadingPosition(
+        paper.lastPageTranslated,
+        paper.lastOffsetTranslated,
+        pageCountTranslated,
+      );
 
       if (paper.storageDir !== null) {
         this.assertCanonicalStorageDir(paper);
@@ -310,6 +342,9 @@ export class PaperLibrary {
         return updatePaper(this.db, paperId, {
           filePathTranslated: target,
           pageCountTranslated,
+          pageCountBilingual: null,
+          lastPageTranslated: position.page,
+          lastOffsetTranslated: position.offset,
         });
       }
 
@@ -319,6 +354,13 @@ export class PaperLibrary {
         return updatePaper(this.db, paperId, {
           filePathTranslated: sourcePath,
           pageCountTranslated,
+          pageCountBilingual: bilingualCountFor(
+            paper,
+            sourcePath,
+            pageCountTranslated,
+          ),
+          lastPageTranslated: position.page,
+          lastOffsetTranslated: position.offset,
         });
       }
 
@@ -334,6 +376,9 @@ export class PaperLibrary {
       return updatePaper(this.db, paperId, {
         filePathTranslated: target,
         pageCountTranslated,
+        pageCountBilingual: null,
+        lastPageTranslated: position.page,
+        lastOffsetTranslated: position.offset,
       });
     } finally {
       this.jobs.releaseStorage();
@@ -357,6 +402,11 @@ export class PaperLibrary {
 
       if (version === 'translated') {
         const pageCountTranslated = await this.pageCount(sourcePath);
+        const position = clampReadingPosition(
+          paper.lastPageTranslated,
+          paper.lastOffsetTranslated,
+          pageCountTranslated,
+        );
         let filePathTranslated = sourcePath;
         if (managed) {
           const target = storageFile(root, paper.storageDir!, CUSTOM_TRANSLATED_NAME);
@@ -368,6 +418,11 @@ export class PaperLibrary {
         return updatePaper(this.db, paperId, {
           filePathTranslated,
           pageCountTranslated,
+          pageCountBilingual: managed
+            ? null
+            : bilingualCountFor(paper, filePathTranslated, pageCountTranslated),
+          lastPageTranslated: position.page,
+          lastOffsetTranslated: position.offset,
         });
       }
 
@@ -386,13 +441,19 @@ export class PaperLibrary {
         filePathOriginal = target;
       }
 
+      const position = clampReadingPosition(
+        paper.lastPageOriginal,
+        paper.lastOffsetOriginal,
+        extracted.pageCount,
+      );
       const updated = updatePaper(this.db, paperId, {
         filePathOriginal,
         pageCountOriginal: extracted.pageCount,
         hasTextLayer: extracted.hasTextLayer,
         outline: extracted.outline,
         fileHash: hash,
-        lastPageOriginal: Math.min(paper.lastPageOriginal, extracted.pageCount),
+        lastPageOriginal: position.page,
+        lastOffsetOriginal: position.offset,
       });
       replacePages(this.db, paperId, extracted.pages);
       return updated;

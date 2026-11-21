@@ -5699,3 +5699,66 @@ body.export-body .export-document .markdown-list {
   line-height: 1.5;
   word-break: break-all;
 }
+
+/* In-renderer confirmation dialog. Replaces Electron's native modal, whose
+   focus/IME hand-back is unreliable on Windows. */
+.confirm-dialog-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 200;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgb(var(--shadow-color) / 0.42);
+}
+
+.confirm-dialog {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: min(420px, 100%);
+  padding: 20px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-panel);
+  box-shadow: 0 22px 50px rgb(var(--shadow-color) / 0.24);
+}
+
+.confirm-dialog-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.confirm-dialog-message {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+  line-height: 1.7;
+  overflow-wrap: anywhere;
+}
+
+.confirm-dialog-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.confirm-dialog-actions .secondary-button,
+.confirm-dialog-actions .primary-button {
+  width: auto;
+  min-width: 84px;
+  padding: 7px 16px;
+}
+
+.confirm-dialog-confirm.danger {
+  background: var(--danger);
+  color: var(--on-accent);
+}
+
+.confirm-dialog-confirm.danger:hover:not(:disabled) {
+  background: var(--danger);
+  filter: brightness(0.92);
+}

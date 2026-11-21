@@ -20,6 +20,7 @@ function makePaper(overrides: Partial<Paper> = {}): Paper {
     filePathTranslated: null,
     pageCountOriginal: 3,
     pageCountTranslated: null,
+    pageCountBilingual: null,
     hasTextLayer: true,
     outline: [
       {
@@ -33,6 +34,9 @@ function makePaper(overrides: Partial<Paper> = {}): Paper {
     tags: ['有限元', '数值方法'],
     lastPageOriginal: 1,
     lastPageTranslated: 1,
+    lastVersion: 'original',
+    lastOffsetOriginal: 0,
+    lastOffsetTranslated: 0,
     addedAt: 1000,
     lastReadAt: null,
     folderId: null,

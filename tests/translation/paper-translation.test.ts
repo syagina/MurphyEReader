@@ -301,6 +301,7 @@ describe('PaperTranslationService.start', () => {
     expect(existsSync(bound.filePathTranslated!)).toBe(true);
     expect(existsSync(storageFile(root, bound.storageDir!, BABELDOC_DUAL_NAME))).toBe(true);
     expect(bound.pageCountTranslated).toBe(2);
+    expect(bound.pageCountBilingual).toBe(1);
     expect(bound.lastPageTranslated).toBe(1);
     expect(captured!.config).not.toContain('sk-secret');
     expect(captured!.config).not.toContain('https://relay/v1');
@@ -602,7 +603,10 @@ describe('PaperTranslationService outputs', () => {
     updatePaper(db, paper.id, {
       filePathTranslated: monoPath,
       pageCountTranslated: 2,
+      pageCountBilingual: 9,
       lastPageTranslated: 999,
+      lastOffsetTranslated: 0.5,
+      lastVersion: 'bilingual',
     });
     const oldMono = readFileSync(monoPath);
     const oldDual = readFileSync(dualPath);
@@ -620,7 +624,10 @@ describe('PaperTranslationService outputs', () => {
     expect(readFileSync(monoPath).equals(oldMono)).toBe(false);
     expect(readFileSync(dualPath).equals(oldDual)).toBe(true);
     expect(after.pageCountTranslated).toBe(2);
+    expect(after.pageCountBilingual).toBeNull();
     expect(after.lastPageTranslated).toBe(2);
+    expect(after.lastOffsetTranslated).toBe(0);
+    expect(after.lastVersion).toBe('bilingual');
     const leftovers = readdirSync(join(root, storageDir)).filter(
       (name) => name.includes('.bak-') || name.includes('.new-'),
     );
@@ -683,6 +690,7 @@ describe('PaperTranslationService outputs', () => {
       storageFile(root, bound.storageDir!, BABELDOC_DUAL_NAME),
     );
     expect(bound.pageCountTranslated).toBe(2);
+    expect(bound.pageCountBilingual).toBe(2);
     expect(existsSync(bound.filePathTranslated!)).toBe(true);
     const done = eventsOf<{
       message?: string;

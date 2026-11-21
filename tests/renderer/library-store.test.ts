@@ -4,6 +4,9 @@ import type { PaperLensApi } from '@shared/ipc';
 import type { ImportPaperResult, Paper, PaperFileStatus } from '@shared/types';
 import { useLibraryStore } from '@renderer/stores/library';
 
+const { confirmMock } = vi.hoisted(() => ({ confirmMock: vi.fn() }));
+vi.mock('@renderer/stores/confirm', () => ({ confirm: confirmMock }));
+
 type PaperUpdatePatch = Parameters<PaperLensApi['papers']['update']>[1];
 
 function fileCheck(
@@ -40,11 +43,15 @@ function makePaper(overrides: Partial<Paper> = {}): Paper {
     filePathTranslated: null,
     pageCountOriginal: 120,
     pageCountTranslated: null,
+    pageCountBilingual: null,
     hasTextLayer: true,
     outline: [],
     tags: [],
     lastPageOriginal: 1,
     lastPageTranslated: 1,
+    lastVersion: 'original',
+    lastOffsetOriginal: 0,
+    lastOffsetTranslated: 0,
     addedAt: 1000,
     lastReadAt: null,
     folderId: null,
@@ -77,6 +84,8 @@ let api: ReturnType<typeof installApi>;
 beforeEach(() => {
   useLibraryStore.setState({ papers: [], loading: false, fileStatus: {} });
   api = installApi();
+  confirmMock.mockReset();
+  confirmMock.mockResolvedValue(true);
 });
 
 describe('useLibraryStore.load', () => {
@@ -270,44 +279,47 @@ describe('useLibraryStore.attachTranslated', () => {
   });
 
   it('替换已有译本前先确认，取消时不发起 IPC', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(false);
-    try {
-      useLibraryStore.setState({
-        papers: [makePaper({ id: 2, filePathTranslated: 'D:/papers/old.pdf' })],
-      });
+    confirmMock.mockResolvedValue(false);
+    useLibraryStore.setState({
+      papers: [makePaper({ id: 2, filePathTranslated: 'D:/papers/old.pdf' })],
+    });
 
-      const returned = await useLibraryStore.getState().attachTranslated(2);
+    const returned = await useLibraryStore.getState().attachTranslated(2);
 
-      expect(confirm).toHaveBeenCalledWith('该文献已有译本，确定用新文件替换吗？');
-      expect(api.attachTranslated).not.toHaveBeenCalled();
-      expect(returned).toBeNull();
-      expect(useLibraryStore.getState().papers[0].filePathTranslated).toBe('D:/papers/old.pdf');
-    } finally {
-      confirm.mockRestore();
-    }
+    expect(confirmMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: '替换译本',
+        message: '该文献已有译本，确定用新文件替换吗？',
+      }),
+    );
+    expect(api.attachTranslated).not.toHaveBeenCalled();
+    expect(returned).toBeNull();
+    expect(useLibraryStore.getState().papers[0].filePathTranslated).toBe(
+      'D:/papers/old.pdf',
+    );
   });
 
   it('确认替换后调用 IPC 并返回更新后的文献', async () => {
-    const confirm = vi.spyOn(window, 'confirm').mockReturnValue(true);
-    try {
-      const bound = makePaper({
-        id: 2,
-        filePathTranslated: 'D:/papers/new.pdf',
-        pageCountTranslated: 140,
-      });
-      useLibraryStore.setState({
-        papers: [makePaper({ id: 2, filePathTranslated: 'D:/papers/old.pdf' })],
-      });
-      api.attachTranslated.mockResolvedValue(bound);
+    const bound = makePaper({
+      id: 2,
+      filePathTranslated: 'D:/papers/new.pdf',
+      pageCountTranslated: 140,
+    });
+    useLibraryStore.setState({
+      papers: [makePaper({ id: 2, filePathTranslated: 'D:/papers/old.pdf' })],
+    });
+    api.attachTranslated.mockResolvedValue(bound);
 
-      const returned = await useLibraryStore.getState().attachTranslated(2);
+    const returned = await useLibraryStore.getState().attachTranslated(2);
 
-      expect(confirm).toHaveBeenCalledWith('该文献已有译本，确定用新文件替换吗？');
-      expect(api.attachTranslated).toHaveBeenCalledWith(2);
-      expect(returned).toEqual(bound);
-    } finally {
-      confirm.mockRestore();
-    }
+    expect(confirmMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        title: '替换译本',
+        message: '该文献已有译本，确定用新文件替换吗？',
+      }),
+    );
+    expect(api.attachTranslated).toHaveBeenCalledWith(2);
+    expect(returned).toEqual(bound);
   });
 
   it('未托管文献返回 storageDir 为空的更新结果', async () => {

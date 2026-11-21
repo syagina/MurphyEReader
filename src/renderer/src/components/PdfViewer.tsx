@@ -6,7 +6,6 @@ import {
   useRef,
   useState,
 } from 'react';
-import { getDocument } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type { PDFDocumentLoadingTask, PDFDocumentProxy } from 'pdfjs-dist/legacy/build/pdf.mjs';
 import type {
   AnnotationDrawing,
@@ -29,10 +28,24 @@ import {
 } from '@shared/translation';
 import {
   buildPageWindow,
-  configurePdfWorker,
   findInDocument,
   getSelectionInPage,
 } from '../lib/pdf';
+import {
+  PDF_CACHE_INVALIDATED,
+  clearAll,
+  invalidatePaper,
+  keyFor,
+  load as loadCachedDocument,
+  parsePdfDocument,
+  peek,
+} from '../lib/pdf-document-cache';
+import type { PageSize } from '../lib/pdf-document-cache';
+import {
+  positionFromGeometry,
+} from '../lib/reading-position';
+import type { PageGeometry } from '../lib/reading-position';
+import { confirm } from '../stores/confirm';
 import { errorMessage, stripIpcErrorPrefix } from '../lib/errors';
 import { cropToDataUrl, toSourceRect } from '../lib/screenshot';
 import type { Rect } from '../lib/screenshot';
@@ -88,17 +101,6 @@ export interface PdfViewerProps {
   onOpenSettings?(): void;
   /** Opens the translation-engine tab when whole-paper translation cannot start. */
   onOpenEngineSettings?(): void;
-}
-
-interface PageSize {
-  width: number;
-  height: number;
-}
-
-interface PendingMarkRead {
-  paperId: number;
-  version: PdfVersion;
-  page: number;
 }
 
 interface ToolbarPosition {
@@ -208,9 +210,9 @@ export function PdfViewer({
   onOpenSettings,
   onOpenEngineSettings,
 }: PdfViewerProps): React.JSX.Element {
-  const paperId = useReaderStore((state) => state.paperId);
   const version = useReaderStore((state) => state.version);
   const currentPage = useReaderStore((state) => state.currentPage);
+  const positionSeq = useReaderStore((state) => state.positionSeq);
   const zoom = useReaderStore((state) => state.zoom);
   const storeError = useReaderStore((state) => state.error);
   const versionNotice = useReaderStore((state) => state.versionNotice);
@@ -218,7 +220,11 @@ export function PdfViewer({
   const selection = useReaderStore((state) => state.selection);
   const open = useReaderStore((state) => state.open);
   const setVersion = useReaderStore((state) => state.setVersion);
-  const setCurrentPage = useReaderStore((state) => state.setCurrentPage);
+  const setCurrentPosition = useReaderStore((state) => state.setCurrentPosition);
+  const flushPosition = useReaderStore((state) => state.flushPosition);
+  const adoptDocumentPageCount = useReaderStore(
+    (state) => state.adoptDocumentPageCount,
+  );
   const setZoom = useReaderStore((state) => state.setZoom);
   const jumpToPage = useReaderStore((state) => state.jumpToPage);
   const setSelection = useReaderStore((state) => state.setSelection);
@@ -239,6 +245,7 @@ export function PdfViewer({
   const bilingualAvailable =
     translationBound && fileStatus?.bilingualExists === true;
   const translationJob = useTranslationStore((state) => state.job);
+  const donePaper = useTranslationStore((state) => state.donePaper);
   const startPaperTranslation = useTranslationStore((state) => state.start);
   const paperTranslating =
     translationJob !== null &&
@@ -316,10 +323,7 @@ export function PdfViewer({
     height: STICKY_POPUP_MAX_HEIGHT,
   });
   const searchSeqRef = useRef(0);
-  const markReadTimerRef = useRef<number | null>(null);
-  const pendingMarkRef = useRef<PendingMarkRead | null>(null);
-  const lastMarkedRef = useRef<{ paperId: number; page: number } | null>(null);
-  const lastScrollDerivedPageRef = useRef<number | null>(null);
+  const pageGeometryRef = useRef<PageGeometry[]>([]);
   const programmaticScrollRef = useRef<number | null>(null);
   const programmaticTimerRef = useRef<number | null>(null);
   const translationCardRef = useRef<HTMLDivElement | null>(null);
@@ -477,10 +481,12 @@ export function PdfViewer({
   // Load (and reload after relocation) the document for the current paper.
   useEffect(() => {
     let cancelled = false;
-    let loadingTask: PDFDocumentLoadingTask | null = null;
+    // Direct parses (repaired files) are not cached, so this effect owns them.
+    let directTask: PDFDocumentLoadingTask | null = null;
 
     setPdf(null);
     setPageSizes([]);
+    pageGeometryRef.current = [];
     setLoadError(null);
     setMatches(null);
     setMatchIndex(0);
@@ -491,10 +497,8 @@ export function PdfViewer({
     setTranslationStartError(null);
     closeTranslation();
     searchSeqRef.current += 1;
-    lastMarkedRef.current = null;
-    lastScrollDerivedPageRef.current = null;
 
-    const load = async (): Promise<void> => {
+    const loadDocument = async (): Promise<void> => {
       // A paper change (or the initial mount) must open a new reader session;
       // a version switch already updated the store and must keep its state.
       if (useReaderStore.getState().paperId !== paper.id) {
@@ -509,33 +513,60 @@ export function PdfViewer({
         return;
       }
 
-      configurePdfWorker();
       const currentVersion = useReaderStore.getState().version;
+      const key = keyFor(paper, currentVersion);
       try {
-        const { data } = await window.api.pdf.load(paper.id, currentVersion);
+        const cached = peek(key);
+        if (cached !== null) {
+          // Metadata page counts can be provisional for legacy bilingual rows;
+          // PDF.js's actual count is authoritative before the first restore.
+          adoptDocumentPageCount(cached.pdf.numPages);
+          setPageSizes(cached.pageSizes);
+          setPdf(cached.pdf);
+          return;
+        }
+
+        const loaded = await window.api.pdf.load(paper.id, currentVersion);
         if (cancelled) {
           return;
         }
-        loadingTask = getDocument({ data: new Uint8Array(data) });
-        const loadedPdf = await loadingTask.promise;
-        if (cancelled) {
-          void loadingTask.destroy();
-          return;
-        }
-        const sizes: PageSize[] = [];
-        for (let pageNo = 1; pageNo <= loadedPdf.numPages; pageNo += 1) {
-          const page = await loadedPdf.getPage(pageNo);
-          const viewport = page.getViewport({ scale: 1 });
-          sizes.push({ width: viewport.width, height: viewport.height });
+        if (loaded.repaired === true) {
+          // A repaired document must not stay under the stale binding key.
+          invalidatePaper(paper.id);
+          void useLibraryStore
+            .getState()
+            .load()
+            .catch((refreshError: unknown) => {
+              console.warn('刷新文献库失败', refreshError);
+            });
+          const parsed = await parsePdfDocument(loaded.data);
+          directTask = parsed.loadingTask;
           if (cancelled) {
-            void loadingTask.destroy();
+            void parsed.loadingTask.destroy();
             return;
           }
+          adoptDocumentPageCount(parsed.pdf.numPages);
+          setPageSizes(parsed.pageSizes);
+          setPdf(parsed.pdf);
+          return;
         }
-        setPageSizes(sizes);
-        setPdf(loadedPdf);
+
+        const entry = await loadCachedDocument(key, () =>
+          parsePdfDocument(loaded.data),
+        );
+        if (cancelled) {
+          return;
+        }
+        adoptDocumentPageCount(entry.pdf.numPages);
+        setPageSizes(entry.pageSizes);
+        setPdf(entry.pdf);
       } catch (error) {
         if (cancelled) {
+          return;
+        }
+        if (error instanceof Error && error.message === PDF_CACHE_INVALIDATED) {
+          // A newer generation owns the document; re-enter through the effect.
+          setReloadToken((token) => token + 1);
           return;
         }
         const message = errorMessage(error);
@@ -545,60 +576,33 @@ export function PdfViewer({
       }
     };
 
-    void load();
+    void loadDocument();
 
     return () => {
       cancelled = true;
-      if (loadingTask !== null) {
-        void loadingTask.destroy();
+      if (directTask !== null) {
+        void directTask.destroy();
       }
     };
-  }, [paper.id, reloadToken, version, open, setError, closeTranslation]);
+  }, [
+    paper.id,
+    reloadToken,
+    version,
+    open,
+    setError,
+    closeTranslation,
+    adoptDocumentPageCount,
+  ]);
 
-  const flushMarkRead = useCallback((): void => {
-    if (markReadTimerRef.current !== null) {
-      window.clearTimeout(markReadTimerRef.current);
-      markReadTimerRef.current = null;
-    }
-    const pending = pendingMarkRef.current;
-    pendingMarkRef.current = null;
-    if (pending === null) {
-      return;
-    }
-    window.api.papers
-      .markRead(pending.paperId, pending.version, pending.page)
-      .catch((error: unknown) => {
-        console.warn('记录阅读进度失败', error);
-      });
-  }, []);
-
-  // Flush a still-debounced progress update when the viewer unmounts.
+  // The cached task outlives this view on purpose; only the session teardown
+  // destroys parsed documents.
   useEffect(
     () => () => {
-      flushMarkRead();
+      void flushPosition();
+      clearAll();
     },
-    [flushMarkRead],
+    [flushPosition],
   );
-
-  // Persist the reading position 500ms after the page settles.
-  useEffect(() => {
-    if (pdf === null || paperId === null) {
-      return;
-    }
-    const previous = lastMarkedRef.current;
-    lastMarkedRef.current = { paperId, page: currentPage };
-    if (previous === null || previous.paperId !== paperId || previous.page === currentPage) {
-      return;
-    }
-    pendingMarkRef.current = { paperId, version, page: currentPage };
-    if (markReadTimerRef.current !== null) {
-      window.clearTimeout(markReadTimerRef.current);
-    }
-    markReadTimerRef.current = window.setTimeout(() => {
-      markReadTimerRef.current = null;
-      flushMarkRead();
-    }, 500);
-  }, [pdf, paperId, version, currentPage, flushMarkRead]);
 
   // Switch to one of the available document layouts. The pending progress
   // write still carries the old version and is flushed before the new load.
@@ -618,8 +622,6 @@ export function PdfViewer({
           return;
         }
       }
-      flushMarkRead();
-      lastMarkedRef.current = null;
       setSwitching(true);
       try {
         await setVersion(target);
@@ -632,7 +634,6 @@ export function PdfViewer({
       translationBound,
       translatedOnlyAvailable,
       bilingualAvailable,
-      flushMarkRead,
       setVersion,
     ],
   );
@@ -675,34 +676,59 @@ export function PdfViewer({
     };
   }, [cycleVersion]);
 
-  const updateCurrentPageFromScroll = useCallback((): void => {
+  // Page tops in the reading container's scroll coordinates. The wrappers have
+  // explicit widths/heights, so only a document or zoom change moves them.
+  useLayoutEffect(() => {
+    const container = scrollRef.current;
+    if (container === null) {
+      pageGeometryRef.current = [];
+      return;
+    }
+    const containerRect = container.getBoundingClientRect();
+    const geometry: PageGeometry[] = [];
+    container
+      .querySelectorAll<HTMLElement>('[data-page-no]')
+      .forEach((wrapper) => {
+        const page = Number(wrapper.dataset.pageNo);
+        if (!Number.isFinite(page)) {
+          return;
+        }
+        const rect = wrapper.getBoundingClientRect();
+        geometry.push({
+          page,
+          top: rect.top - containerRect.top + container.scrollTop,
+          height: rect.height,
+        });
+      });
+    pageGeometryRef.current = geometry;
+  }, [pdf, pageSizes.length, zoom]);
+
+  const updatePositionFromScroll = useCallback((): void => {
     const container = scrollRef.current;
     if (container === null || programmaticScrollRef.current !== null) {
       return;
     }
-    const containerTop = container.getBoundingClientRect().top;
-    let nearestPage: number | null = null;
-    let nearestDistance = Number.POSITIVE_INFINITY;
-    const wrappers = container.querySelectorAll<HTMLElement>('[data-page-no]');
-    wrappers.forEach((wrapper) => {
-      const distance = Math.abs(wrapper.getBoundingClientRect().top - containerTop);
-      if (distance < nearestDistance) {
-        nearestDistance = distance;
-        nearestPage = Number(wrapper.dataset.pageNo);
-      }
-    });
-    if (nearestPage === null) {
+    if (pageGeometryRef.current.length === 0) {
       return;
     }
-    if (nearestPage !== useReaderStore.getState().currentPage) {
-      lastScrollDerivedPageRef.current = nearestPage;
-      setCurrentPage(nearestPage);
+    const position = positionFromGeometry(
+      pageGeometryRef.current,
+      container.scrollTop,
+    );
+    const state = useReaderStore.getState();
+    if (
+      position.page === state.currentPage &&
+      Math.abs(position.offset - state.currentOffset) < 1e-6
+    ) {
+      return;
     }
-  }, [setCurrentPage]);
+    setCurrentPosition(position.page, position.offset);
+  }, [setCurrentPosition]);
 
-  // Restore the saved page after load and follow outline/search jumps. Scroll
-  // updates produced by this effect are suppressed in the scroll handler.
-  useEffect(() => {
+  // Restore the saved page and intra-page offset after load, and follow
+  // outline/search jumps and version switches. Scroll updates produced by this
+  // effect are suppressed in the scroll handler.
+  useLayoutEffect(() => {
     if (pdf === null || pageSizes.length === 0) {
       return;
     }
@@ -710,16 +736,14 @@ export function PdfViewer({
     if (container === null) {
       return;
     }
-    const page = useReaderStore.getState().currentPage;
-    if (lastScrollDerivedPageRef.current === page) {
-      lastScrollDerivedPageRef.current = null;
-      return;
-    }
-    const wrapper = container.querySelector<HTMLElement>(`[data-page-no="${page}"]`);
+    const state = useReaderStore.getState();
+    const wrapper = container.querySelector<HTMLElement>(
+      `[data-page-no="${state.currentPage}"]`,
+    );
     if (wrapper === null) {
       return;
     }
-    programmaticScrollRef.current = page;
+    programmaticScrollRef.current = state.currentPage;
     if (programmaticTimerRef.current !== null) {
       window.clearTimeout(programmaticTimerRef.current);
     }
@@ -727,7 +751,12 @@ export function PdfViewer({
       programmaticScrollRef.current = null;
       programmaticTimerRef.current = null;
     }, 200);
-    wrapper.scrollIntoView({ block: 'start' });
+    const wrapperRect = wrapper.getBoundingClientRect();
+    const containerRect = container.getBoundingClientRect();
+    container.scrollTop +=
+      wrapperRect.top -
+      containerRect.top +
+      state.currentOffset * wrapperRect.height;
     return () => {
       if (programmaticTimerRef.current !== null) {
         window.clearTimeout(programmaticTimerRef.current);
@@ -735,7 +764,91 @@ export function PdfViewer({
       }
       programmaticScrollRef.current = null;
     };
-  }, [pdf, pageSizes.length, currentPage]);
+  }, [pdf, pageSizes.length, zoom, positionSeq]);
+
+  // Warm the other available layouts once the current page is on screen so a
+  // later version switch does not wait on IPC + parsing. Failures (including a
+  // repaired file, which must not be cached under a stale binding key) are
+  // ignored here and retried by the normal open path.
+  useEffect(() => {
+    if (pdf === null || pageSizes.length === 0) {
+      return;
+    }
+    const activeVersion = useReaderStore.getState().version;
+    const targets: PdfVersion[] = [];
+    if (translatedOnlyAvailable) {
+      targets.push('translated');
+    }
+    if (bilingualAvailable) {
+      targets.push('bilingual');
+    }
+    const pending = targets.filter(
+      (target) =>
+        target !== activeVersion && peek(keyFor(paper, target)) === null,
+    );
+    if (pending.length === 0) {
+      return;
+    }
+
+    let cancelled = false;
+    const run = (): void => {
+      void (async () => {
+        for (const target of pending) {
+          if (cancelled) {
+            return;
+          }
+          const key = keyFor(paper, target);
+          if (peek(key) !== null) {
+            continue;
+          }
+          try {
+            await loadCachedDocument(key, async () => {
+              const loaded = await window.api.pdf.load(paper.id, target);
+              if (loaded.repaired === true) {
+                throw new Error('修复后的 PDF 不进入预载缓存');
+              }
+              return parsePdfDocument(loaded.data);
+            });
+          } catch {
+            // The on-demand path reports real errors to the user.
+          }
+        }
+      })();
+    };
+
+    const supportsIdle = typeof window.requestIdleCallback === 'function';
+    const handle = supportsIdle
+      ? window.requestIdleCallback(run)
+      : window.setTimeout(run, 200);
+    return () => {
+      cancelled = true;
+      if (supportsIdle) {
+        window.cancelIdleCallback(handle);
+      } else {
+        window.clearTimeout(handle);
+      }
+    };
+  }, [
+    pdf,
+    pageSizes.length,
+    paper,
+    translatedOnlyAvailable,
+    bilingualAvailable,
+  ]);
+
+  // A finished whole-paper translation rebinds the files behind the paper, so
+  // every parsed document for it is stale. A translated/bilingual view reloads
+  // in place; the original layout is unaffected visually but its cache entry
+  // is still invalidated so the next switch sees the new binding.
+  useEffect(() => {
+    if (donePaper === null || donePaper.id !== paper.id) {
+      return;
+    }
+    invalidatePaper(paper.id);
+    if (useReaderStore.getState().version !== 'original') {
+      setReloadToken((token) => token + 1);
+    }
+  }, [donePaper, paper.id]);
 
   // Fixed-position note popup. Placement depends on the note's stored mode:
   // `anchor` follows the mark (and closes on user movement so a fixed card
@@ -1705,7 +1818,13 @@ export function PdfViewer({
 
   /** Clear-page is deliberately not undoable; it only resets both stacks. */
   const handleClearPage = useCallback(async (): Promise<void> => {
-    if (!window.confirm('清空本页所有绘制？文字标记和便签不会删除。')) {
+    const ok = await confirm({
+      title: '清空本页绘制',
+      message: '清空本页所有绘制？文字标记和便签不会删除。',
+      confirmLabel: '清空',
+      tone: 'danger',
+    });
+    if (!ok) {
       return;
     }
     const startPaperId = paper.id;
@@ -1776,7 +1895,13 @@ export function PdfViewer({
   };
 
   const handleDeleteActiveNote = async (note: StickyNote): Promise<void> => {
-    if (!window.confirm('删除这条标注？')) {
+    const ok = await confirm({
+      title: '删除标注',
+      message: '删除这条标注？',
+      confirmLabel: '删除',
+      tone: 'danger',
+    });
+    if (!ok) {
       return;
     }
     openNote(null);
@@ -1865,7 +1990,12 @@ export function PdfViewer({
       // translation, so relocation always targets original or translated.
       const state = useReaderStore.getState();
       const failed = state.failedVersion ?? state.version;
-      const target = failed === 'original' ? 'original' : 'translated';
+      const target: PdfVersion =
+        failed === 'original' ? 'original' : 'translated';
+      // The pending position belongs to the old file and must land before the
+      // repaired binding changes which document owns it.
+      await flushPosition();
+      invalidatePaper(paper.id);
       const updated = await window.api.papers.relocate(paper.id, target);
       // A stale continuation must not act on a paper that is no longer open.
       if (useReaderStore.getState().paperId !== paper.id) {
@@ -1874,22 +2004,20 @@ export function PdfViewer({
       if (updated !== null) {
         setLoadError(null);
         setError(null);
-        flushMarkRead();
-        lastMarkedRef.current = null;
         // Reload metadata (path, page count, outline) for the relocated file.
         await open(paper.id);
         if (useReaderStore.getState().paperId !== paper.id) {
           return;
         }
-        if (target === 'translated') {
-          // open() reset the session to the original; restore the translated view.
-          await setVersion('translated');
+        if (useReaderStore.getState().version !== target) {
+          await setVersion(target);
           if (useReaderStore.getState().paperId !== paper.id) {
             return;
           }
-        } else {
-          setReloadToken((token) => token + 1);
         }
+        // The version effect may already have started a load; the token makes
+        // sure a file replaced at the same metadata is read again.
+        setReloadToken((token) => token + 1);
         void useLibraryStore
           .getState()
           .load()
@@ -2353,7 +2481,7 @@ export function PdfViewer({
             if (programmaticScrollRef.current === null) {
               repositionActiveNote();
             }
-            updateCurrentPageFromScroll();
+            updatePositionFromScroll();
           }}
           onMouseUp={handleMouseUp}
           onKeyUp={handleSelectionEvent}

@@ -9,6 +9,7 @@ import {
 import { formatTimestamp, parseTags } from '../lib/format';
 import { isNoteDraftDirty, noteDraftFromNote } from '../lib/note-draft';
 import type { NoteDraft } from '../lib/note-draft';
+import { confirm } from '../stores/confirm';
 import { useNotesStore } from '../stores/notes';
 import { MarkdownView } from './MarkdownView';
 
@@ -100,15 +101,29 @@ export function NoteEditor({ paper, note, onClose }: NoteEditorProps): React.JSX
     setLocalError(null);
   };
 
-  const handleClose = (): void => {
-    if (dirty && !window.confirm('有未保存的修改，确定关闭？')) {
-      return;
+  const handleClose = async (): Promise<void> => {
+    if (dirty) {
+      const ok = await confirm({
+        title: '关闭笔记',
+        message: '有未保存的修改，确定关闭？',
+        confirmLabel: '放弃修改',
+        tone: 'danger',
+      });
+      if (!ok) {
+        return;
+      }
     }
     onClose();
   };
 
   const handleDelete = async (): Promise<void> => {
-    if (!window.confirm(`确定删除笔记「${note.title}」？此操作不可恢复。`)) {
+    const ok = await confirm({
+      title: '删除笔记',
+      message: `确定删除笔记「${note.title}」？此操作不可恢复。`,
+      confirmLabel: '删除',
+      tone: 'danger',
+    });
+    if (!ok) {
       return;
     }
     setDeleting(true);
@@ -247,7 +262,14 @@ export function NoteEditor({ paper, note, onClose }: NoteEditorProps): React.JSX
           </button>
         </div>
         <div className="note-editor-save-actions">
-          <button type="button" className="menu-button" disabled={busy} onClick={handleClose}>
+          <button
+            type="button"
+            className="menu-button"
+            disabled={busy}
+            onClick={() => {
+              void handleClose();
+            }}
+          >
             关闭
           </button>
           {mode === 'edit' ? (

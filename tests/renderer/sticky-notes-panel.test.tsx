@@ -19,6 +19,9 @@ import { StickyNotesPanel } from '@renderer/components/StickyNotesPanel';
 import { useReaderStore } from '@renderer/stores/reader';
 import { useStickyNotesStore } from '@renderer/stores/sticky-notes';
 
+const { confirmMock } = vi.hoisted(() => ({ confirmMock: vi.fn() }));
+vi.mock('@renderer/stores/confirm', () => ({ confirm: confirmMock }));
+
 function paper(): Paper {
   return {
     id: 1,
@@ -29,6 +32,7 @@ function paper(): Paper {
     filePathTranslated: null,
     pageCountOriginal: 3,
     pageCountTranslated: null,
+    pageCountBilingual: null,
     hasTextLayer: true,
     outline: [],
     tags: [],
@@ -37,6 +41,9 @@ function paper(): Paper {
     fileHash: null,
     lastPageOriginal: 1,
     lastPageTranslated: 1,
+    lastVersion: 'original',
+    lastOffsetOriginal: 0,
+    lastOffsetTranslated: 0,
     addedAt: 0,
     lastReadAt: null,
   };
@@ -139,7 +146,6 @@ function installApi(): StickyNotesApiMock {
 }
 
 let api: StickyNotesApiMock;
-let confirmSpy: ReturnType<typeof vi.spyOn>;
 
 function renderPanel(notes: StickyNote[], pageCount = 3): void {
   useStickyNotesStore.setState({
@@ -164,7 +170,8 @@ function renderPanel(notes: StickyNote[], pageCount = 3): void {
 beforeEach(() => {
   useStickyNotesStore.getState().reset();
   api = installApi();
-  confirmSpy = vi.spyOn(window, 'confirm').mockReturnValue(true);
+  confirmMock.mockReset();
+  confirmMock.mockResolvedValue(true);
 });
 
 afterEach(() => {
@@ -263,13 +270,15 @@ describe('StickyNotesPanel 标注筛选与列表', () => {
     expect((rowButton as HTMLButtonElement).parentElement).toBe(listItem);
 
     fireEvent.click(deleteButton);
-    expect(confirmSpy).toHaveBeenCalledWith('删除这条绘制标注？');
+    expect(confirmMock).toHaveBeenCalledWith(
+      expect.objectContaining({ message: '删除这条绘制标注？' }),
+    );
     await waitFor(() => {
       expect(api.remove).toHaveBeenCalledWith(3);
     });
 
     api.remove.mockClear();
-    confirmSpy.mockReturnValue(false);
+    confirmMock.mockResolvedValue(false);
     const shapeRow = screen.getByText('矩形').closest('button');
     const shapeDelete = within(shapeRow?.parentElement as HTMLElement).getByRole(
       'button',

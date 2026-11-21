@@ -5,6 +5,7 @@ import type {
   PaperFileStatus,
   PaperUpdatePatch,
 } from '@shared/types';
+import { confirm } from './confirm';
 
 export type { PaperUpdatePatch };
 
@@ -107,7 +108,13 @@ export const useLibraryStore = create<LibraryState>()((set, get) => ({
   async attachTranslated(id) {
     const existing = get().papers.find((paper) => paper.id === id);
     if (existing !== undefined && existing.filePathTranslated !== null) {
-      if (!window.confirm(REPLACE_TRANSLATION_CONFIRM)) {
+      const ok = await confirm({
+        title: '替换译本',
+        message: REPLACE_TRANSLATION_CONFIRM,
+        confirmLabel: '替换',
+        tone: 'danger',
+      });
+      if (!ok) {
         return null;
       }
     }
