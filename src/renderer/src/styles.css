@@ -5700,6 +5700,154 @@ body.export-body .export-document .markdown-list {
   word-break: break-all;
 }
 
+/* Saved AI endpoint profiles. */
+.ai-profiles {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgb(var(--shadow-color) / 0.03);
+}
+
+.ai-profiles-head,
+.ai-profile-form-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.ai-profiles-head h3,
+.ai-profile-form-head h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.ai-profile-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.ai-profile-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ai-profile-select {
+  display: flex;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 9px;
+  border: 1px solid transparent;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.ai-profile-select:hover {
+  background: var(--bg-hover);
+}
+
+.ai-profile-select[aria-pressed='true'] {
+  border-color: var(--accent-border);
+  background: var(--accent-soft);
+}
+
+.ai-profile-dot {
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.ai-profile-row.active .ai-profile-dot {
+  color: var(--success);
+}
+
+.ai-profile-name {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-profile-speed {
+  margin-left: auto;
+  overflow: hidden;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.ai-profile-speed.error {
+  color: var(--danger);
+}
+
+.ai-profile-badge {
+  flex: none;
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--success-soft);
+  color: var(--success);
+  font-size: 11px;
+  font-weight: 600;
+}
+
+.ai-profile-use {
+  flex: none;
+  padding: 3px 10px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.ai-profiles-test {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+
+.ai-profiles-test .menu-button {
+  padding: 6px 12px;
+  text-align: center;
+}
+
+.ai-profile-hint,
+.ai-profiles-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 11px;
+  line-height: 1.6;
+}
+
+.ai-profile-form-head {
+  margin-top: 2px;
+  padding-top: 8px;
+  border-top: 1px dashed var(--border);
+}
+
+.ai-profile-delete {
+  color: var(--danger);
+}
+
+.ai-profile-delete:hover:not(:disabled) {
+  border-color: var(--danger-border);
+  background: var(--danger-soft);
+}
+
 /* In-renderer confirmation dialog. Replaces Electron's native modal, whose
    focus/IME hand-back is unreliable on Windows. */
 .confirm-dialog-backdrop {

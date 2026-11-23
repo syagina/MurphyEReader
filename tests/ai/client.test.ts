@@ -329,6 +329,62 @@ describe('AiClient 错误映射', () => {
   });
 });
 
+describe('AiClient.testChatSpeed', () => {
+  it('发送极短真实对话请求，报告首字与总耗时', async () => {
+    const server = await startServer((_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'text/event-stream; charset=utf-8' });
+      response.write(deltaChunk('p'));
+      response.write('data: [DONE]\n\n');
+      response.end();
+    });
+    const client = createClient(`${server.baseUrl}/`);
+
+    const result = await client.testChatSpeed();
+
+    expect(result.firstTokenMs).toBeGreaterThanOrEqual(0);
+    expect(result.totalMs).toBeGreaterThanOrEqual(result.firstTokenMs);
+
+    const request = server.requests[0];
+    expect(request.method).toBe('POST');
+    expect(request.url).toBe('/chat/completions');
+    const body = JSON.parse(request.body) as {
+      stream: boolean;
+      max_tokens: number;
+      temperature: number;
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(body.stream).toBe(true);
+    expect(body.max_tokens).toBe(1);
+    expect(body.temperature).toBe(0);
+    expect(body.messages).toEqual([{ role: 'user', content: 'ping' }]);
+  });
+
+  it('服务端不走 SSE 时用完整响应时间作为首字时间', async () => {
+    const server = await startServer((_request, response) => {
+      response.writeHead(200, { 'Content-Type': 'application/json' });
+      response.end(JSON.stringify({ choices: [{ message: { content: 'pong' } }] }));
+    });
+    const client = createClient(server.baseUrl);
+
+    const result = await client.testChatSpeed();
+
+    expect(result.firstTokenMs).toBeGreaterThanOrEqual(0);
+    expect(result.totalMs).toBeGreaterThanOrEqual(result.firstTokenMs);
+  });
+
+  it('超时映射为「请求超时」', async () => {
+    const server = await startServer((_request, response) => {
+      setTimeout(() => {
+        response.writeHead(200, { 'Content-Type': 'application/json' });
+        response.end(JSON.stringify({ choices: [{ message: { content: 'late' } }] }));
+      }, 200);
+    });
+    const client = createClient(server.baseUrl, {}, 40);
+
+    await expect(client.testChatSpeed()).rejects.toThrow('请求超时');
+  });
+});
+
 describe('AiClient.testConnection', () => {
   it('GET /models 返回 2xx 时为 ok（baseUrl 末尾斜杠被规范化）', async () => {
     const server = await startServer((_request, response) => {

@@ -29,6 +29,9 @@ const RATE_LIMITED = '请求过于频繁或额度不足';
 const CANCELLED = '已取消';
 const TIMEOUT = '请求超时';
 const DEFAULT_TIMEOUT_MS = 120_000;
+const DEFAULT_SPEED_TEST_TIMEOUT_MS = 15_000;
+const SPEED_TEST_PROMPT = 'ping';
+const SPEED_TEST_MAX_TOKENS = 1;
 const MAX_SERVER_MESSAGE_LENGTH = 500;
 
 function normalizeBaseUrl(baseUrl: string): string {
@@ -282,6 +285,54 @@ export class AiClient {
     }
   }
 
+  /**
+   * Sends one tiny real chat turn and reports how long the first streamed
+   * token took plus the total round trip. Used to compare saved profiles;
+   * costs a token or two per probe.
+   */
+  async testChatSpeed(
+    opts: { timeoutMs?: number } = {},
+  ): Promise<{ firstTokenMs: number; totalMs: number }> {
+    const config = this.getConfig();
+    const { signal, timeout } = this.createSignals(
+      undefined,
+      opts.timeoutMs ?? Math.min(this.timeoutMs, DEFAULT_SPEED_TEST_TIMEOUT_MS),
+    );
+    const startedAt = performance.now();
+    let firstTokenMs: number | null = null;
+    const markFirstToken = (): void => {
+      if (firstTokenMs === null) {
+        firstTokenMs = performance.now() - startedAt;
+      }
+    };
+
+    try {
+      const response = await raceSignal(
+        this.postChat(
+          config,
+          [{ role: 'user', content: SPEED_TEST_PROMPT }],
+          true,
+          undefined,
+          0,
+          signal,
+          SPEED_TEST_MAX_TOKENS,
+        ),
+        signal,
+      );
+      const contentType = response.headers.get('content-type') ?? '';
+      if (contentType.includes('text/event-stream')) {
+        await readSseStream(response, markFirstToken, signal);
+      } else {
+        extractMessageContent(await raceSignal(response.json(), signal));
+        markFirstToken();
+      }
+      const totalMs = performance.now() - startedAt;
+      return { firstTokenMs: firstTokenMs ?? totalMs, totalMs };
+    } catch (error) {
+      throw normalizeError(error, undefined, timeout);
+    }
+  }
+
   private createSignals(
     callerSignal?: AbortSignal,
     timeoutMs?: number,
@@ -306,16 +357,21 @@ export class AiClient {
     model: string | undefined,
     temperature: number,
     signal?: AbortSignal,
+    maxTokens?: number,
   ): Promise<Response> {
+    const body: Record<string, unknown> = {
+      model: model ?? config.chatModel,
+      messages,
+      temperature,
+      stream,
+    };
+    if (maxTokens !== undefined) {
+      body.max_tokens = maxTokens;
+    }
     const response = await fetch(`${normalizeBaseUrl(config.baseUrl)}/chat/completions`, {
       method: 'POST',
       headers: this.authHeaders(config),
-      body: JSON.stringify({
-        model: model ?? config.chatModel,
-        messages,
-        temperature,
-        stream,
-      }),
+      body: JSON.stringify(body),
       signal,
     });
     if (!response.ok) {

@@ -6,6 +6,7 @@ import type Database from 'better-sqlite3';
 import * as electron from 'electron';
 import type { BrowserWindow } from 'electron';
 import type {
+  AiProfileInput,
   AiSettingsInput,
   AppSettings,
   AppSettingsUpdate,
@@ -56,7 +57,16 @@ import {
 } from '../export/sticky-notes-pdf';
 import { PdfExporter } from '../export/pdf-exporter';
 import { JobRegistry } from '../jobs/job-registry';
-import { getApiKey, getSettings, setSettings } from '../settings';
+import { getApiKey, getSettings } from '../settings';
+import {
+  activateProfile,
+  createProfile,
+  deleteProfile,
+  getProfileApiKey,
+  listProfileConfigs,
+  listProfiles,
+  updateProfile,
+} from '../settings/ai-profiles';
 import {
   ensureOnboardedForExistingLibrary,
   getStoredAppSettings,
@@ -96,6 +106,8 @@ type NoteGenerateParams = {
   conceptTitle?: string;
   currentPageNo?: number;
 };
+
+const AI_SPEED_TEST_TIMEOUT_MS = 15_000;
 
 /**
  * Resolves the PDF path for a paper version. Missing papers and unbound
@@ -794,20 +806,60 @@ export function registerIpcHandlers(deps: HandlerDeps): {
 
   electron.ipcMain.handle('settings:get', () => getSettings(db, secret));
 
-  electron.ipcMain.handle('settings:set', (_event, input: AiSettingsInput) =>
-    setSettings(db, secret, input),
+  electron.ipcMain.handle(
+    'settings:test',
+    (_event, input: AiSettingsInput, profileId: number | null = null) => {
+      const apiKey =
+        input.apiKey !== undefined
+          ? input.apiKey
+          : profileId === null
+            ? ''
+            : getProfileApiKey(db, secret, profileId);
+      const client = new AiClient(() => ({
+        baseUrl: input.baseUrl,
+        apiKey,
+        chatModel: input.chatModel,
+        visionModel: input.visionModel,
+        temperature: input.temperature,
+      }));
+      return client.testConnection();
+    },
   );
 
-  electron.ipcMain.handle('settings:test', (_event, input: AiSettingsInput) => {
-    const client = new AiClient(() => ({
-      baseUrl: input.baseUrl,
-      apiKey: input.apiKey === undefined ? getApiKey(db, secret) : input.apiKey,
-      chatModel: input.chatModel,
-      visionModel: input.visionModel,
-      temperature: input.temperature,
-    }));
-    return client.testConnection();
+  electron.ipcMain.handle('aiProfiles:list', () => listProfiles(db));
+
+  electron.ipcMain.handle('aiProfiles:create', (_event, input: AiProfileInput) =>
+    createProfile(db, secret, input),
+  );
+
+  electron.ipcMain.handle(
+    'aiProfiles:update',
+    (_event, id: number, input: AiProfileInput) => updateProfile(db, secret, id, input),
+  );
+
+  electron.ipcMain.handle('aiProfiles:remove', (_event, id: number) => {
+    deleteProfile(db, id);
   });
+
+  electron.ipcMain.handle('aiProfiles:activate', (_event, id: number) => {
+    activateProfile(db, id);
+  });
+
+  // Each probe decrypts its profile's key in the main process only. Failures
+  // are per-profile results, not a rejected batch.
+  electron.ipcMain.handle('aiProfiles:speedTest', () =>
+    Promise.all(
+      listProfileConfigs(db, secret).map(async ({ id, config }) => {
+        const client = new AiClient(() => config, AI_SPEED_TEST_TIMEOUT_MS);
+        try {
+          const { firstTokenMs, totalMs } = await client.testChatSpeed();
+          return { profileId: id, ok: true, firstTokenMs, totalMs };
+        } catch (error) {
+          return { profileId: id, ok: false, error: errorMessage(error) };
+        }
+      }),
+    ),
+  );
 
   // Dedicated constant-URL link: the renderer cannot pass an arbitrary target.
   electron.ipcMain.handle('settings:openDeepSeekConsole', async () => {

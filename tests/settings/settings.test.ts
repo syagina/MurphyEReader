@@ -4,17 +4,23 @@ import { join } from 'node:path';
 import type Database from 'better-sqlite3';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { openDb } from '@main/db';
-import { getApiKey, getSettings, SETTINGS_KEYS, setSettings } from '@main/settings';
+import { getApiKey, getSettings } from '@main/settings';
+import {
+  activateProfile,
+  createProfile,
+  updateProfile,
+} from '@main/settings/ai-profiles';
 import { createPlainTestSecretStore } from '@main/settings/secret-store';
 import type { SecretStore } from '@main/settings/secret-store';
-import type { AiSettingsInput } from '@shared/types';
+import type { AiProfileInput } from '@shared/types';
 
 let tempDir: string;
 let db: Database.Database;
 let secret: SecretStore;
 
-function inputWith(overrides: Partial<AiSettingsInput> = {}): AiSettingsInput {
+function inputWith(overrides: Partial<AiProfileInput> = {}): AiProfileInput {
   return {
+    name: '默认配置',
     baseUrl: 'https://api.example.com/v1',
     chatModel: 'gpt-4o',
     visionModel: 'gpt-4o-mini',
@@ -22,13 +28,6 @@ function inputWith(overrides: Partial<AiSettingsInput> = {}): AiSettingsInput {
     tokenBudget: 50000,
     ...overrides,
   };
-}
-
-function storedValue(key: string): string | undefined {
-  const row = db
-    .prepare('SELECT value FROM settings WHERE key = ?')
-    .get(key) as { value: string } | undefined;
-  return row?.value;
 }
 
 beforeEach(() => {
@@ -66,85 +65,46 @@ describe('getSettings', () => {
     });
   });
 
-  it('存储的数值不是有限数字时回退到默认值，其余字段照常读取', () => {
-    const insert = db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)');
-    insert.run(SETTINGS_KEYS.temperature, 'not-a-number');
-    insert.run(SETTINGS_KEYS.tokenBudget, 'Infinity');
-    insert.run(SETTINGS_KEYS.baseUrl, 'https://kept.example.com');
+  it('读取当前生效档案，而不是任意一条', () => {
+    const created = createProfile(db, secret, inputWith({ apiKey: 'sk-test' }));
+    activateProfile(db, created.id);
 
-    const settings = getSettings(db, secret);
-
-    expect(settings.temperature).toBe(0.3);
-    expect(settings.tokenBudget).toBe(100000);
-    expect(settings.baseUrl).toBe('https://kept.example.com');
-  });
-
-  it('apiKey 行是空字符串时视为未设置', () => {
-    db.prepare('INSERT INTO settings (key, value) VALUES (?, ?)').run(
-      SETTINGS_KEYS.apiKey,
-      '',
-    );
-
-    expect(getSettings(db, secret).apiKeySet).toBe(false);
-    expect(getApiKey(db, secret)).toBe('');
-  });
-});
-
-describe('setSettings', () => {
-  it('写入后读取返回同样的设置，apiKey 以密文落库且 apiKeySet 为 true', () => {
-    const input = inputWith({ apiKey: 'sk-test' });
-
-    const returned = setSettings(db, secret, input);
-
-    const expected = {
-      baseUrl: input.baseUrl,
-      chatModel: input.chatModel,
-      visionModel: input.visionModel,
-      temperature: input.temperature,
-      tokenBudget: input.tokenBudget,
+    expect(getSettings(db, secret)).toEqual({
+      baseUrl: inputWith().baseUrl,
+      chatModel: inputWith().chatModel,
+      visionModel: inputWith().visionModel,
+      temperature: inputWith().temperature,
+      tokenBudget: inputWith().tokenBudget,
       apiKeySet: true,
-    };
-    expect(returned).toEqual(expected);
-    expect(getSettings(db, secret)).toEqual(expected);
-    expect(storedValue(SETTINGS_KEYS.apiKey)).toBe('plain:sk-test');
+    });
+    expect(getApiKey(db, secret)).toBe('sk-test');
   });
 
-  it('input.apiKey 为 undefined 时保留旧 key', () => {
-    setSettings(db, secret, inputWith({ apiKey: 'sk-old' }));
+  it('切换档案后立即读到新档案', () => {
+    const first = createProfile(
+      db,
+      secret,
+      inputWith({ name: 'A', baseUrl: 'https://a.example.com/v1', apiKey: 'sk-a' }),
+    );
+    const second = createProfile(
+      db,
+      secret,
+      inputWith({ name: 'B', baseUrl: 'https://b.example.com/v1', apiKey: 'sk-b' }),
+    );
+    activateProfile(db, first.id);
+    expect(getSettings(db, secret).baseUrl).toBe('https://a.example.com/v1');
 
-    const returned = setSettings(db, secret, inputWith({ chatModel: 'gpt-4.1' }));
+    activateProfile(db, second.id);
 
-    expect(returned.apiKeySet).toBe(true);
-    expect(getApiKey(db, secret)).toBe('sk-old');
-    expect(storedValue(SETTINGS_KEYS.apiKey)).toBe('plain:sk-old');
-  });
-
-  it("input.apiKey 为 '' 时删除 key 行并将 apiKeySet 置为 false", () => {
-    setSettings(db, secret, inputWith({ apiKey: 'sk-old' }));
-
-    const returned = setSettings(db, secret, inputWith({ apiKey: '' }));
-
-    expect(returned.apiKeySet).toBe(false);
-    expect(getApiKey(db, secret)).toBe('');
-    expect(storedValue(SETTINGS_KEYS.apiKey)).toBeUndefined();
-  });
-});
-
-describe('getApiKey', () => {
-  it('解密已存储的 key 返回明文', () => {
-    setSettings(db, secret, inputWith({ apiKey: 'sk-decrypt-me' }));
-
-    expect(getApiKey(db, secret)).toBe('sk-decrypt-me');
-  });
-
-  it('未存储 key 时返回空字符串', () => {
-    expect(getApiKey(db, secret)).toBe('');
+    expect(getSettings(db, secret).baseUrl).toBe('https://b.example.com/v1');
+    expect(getApiKey(db, secret)).toBe('sk-b');
   });
 });
 
 describe('API key 安全边界', () => {
   it('getSettings 只暴露 apiKeySet，不含明文 key，也不触发解密', () => {
-    setSettings(db, secret, inputWith({ apiKey: 'sk-super-secret' }));
+    const created = createProfile(db, secret, inputWith({ apiKey: 'sk-super-secret' }));
+    activateProfile(db, created.id);
     const decryptGuard: SecretStore = {
       encrypt: (plain) => secret.encrypt(plain),
       decrypt: () => {
@@ -165,5 +125,14 @@ describe('API key 安全边界', () => {
       'visionModel',
     ]);
     expect(JSON.stringify(settings)).not.toContain('sk-super-secret');
+  });
+
+  it('更新 apiKey 后旧明文不再出现在读取结果中', () => {
+    const created = createProfile(db, secret, inputWith({ apiKey: 'sk-old' }));
+    activateProfile(db, created.id);
+    updateProfile(db, secret, created.id, inputWith({ apiKey: 'sk-new' }));
+
+    expect(getApiKey(db, secret)).toBe('sk-new');
+    expect(JSON.stringify(getSettings(db, secret))).not.toContain('sk-old');
   });
 });

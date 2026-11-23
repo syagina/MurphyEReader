@@ -82,6 +82,12 @@ build         App icons and packaging resources
 
 ## Changelog
 
+### v1.3.0 (2026-11-23)
+
+- Saves multiple AI provider configurations as named profiles and switches the active AI source in Settings.
+- Runs a concurrent real-chat speed probe across profiles, reporting first-token and total latency.
+- Existing AI settings are migrated into a default profile automatically.
+
 ### v1.2.0 (2026-11-21)
 
 - Restores the last layout, page, and in-page position; switching layouts keeps your place.
@@ -92,29 +98,6 @@ build         App icons and packaging resources
 
 - Fixed whole-paper translation silently falling back to the original English when a Windows system proxy is enabled. BabelDOC's loopback translation relay now bypasses system proxies, so it no longer receives a 502 before reaching the app.
 - Incomplete translations now report the affected page numbers and keep a diagnostic folder containing the completeness report and generated PDFs.
-
-### v1.0.3 (2026-11-19)
-
-- Reorganized Smart Reading context into a stable paper prefix plus per-turn volatile context, so page changes and text selections no longer invalidate the cached full-text prefix on DeepSeek and other OpenAI-compatible APIs.
-- Preserved current-page and selection context when sending images with a question.
-- AI answers now follow the language of the user's question instead of always replying in Chinese, and the requirement to rely only on the supplied paper context is relaxed.
-
-<details>
-<summary>Show all updates</summary>
-
-### v1.0.1 (2026-11-19)
-
-- Added PDF validation: scanned PDFs are detected, and files without a text layer prompt you to OCR them before translation.
-- Improved translation logs: progress and status are more accurate.
-- Improved translation speed.
-
-### v1.0.0 (2026-11-17)
-
-- First public release: library, PDF reading, Smart Reading, selection translation, layout-preserving translation, annotations and notes, appearance, and onboarding.
-
-No earlier versions have been published.
-
-</details>
 
 ## Feedback
 

@@ -1,6 +1,9 @@
 import type {
+  AiProfile,
+  AiProfileInput,
   AiSettings,
   AiSettingsInput,
+  AiSpeedTestResult,
   AppSettings,
   AppSettingsUpdate,
   ChatMessage,
@@ -188,11 +191,27 @@ export interface PaperLensApi {
     onFullscreenChange(cb: (fullscreen: boolean) => void): () => void;
   };
   settings: {
+    /** View of the currently active profile; never includes the API key. */
     get(): Promise<AiSettings>;
-    set(input: AiSettingsInput): Promise<AiSettings>;
-    test(input: AiSettingsInput): Promise<{ ok: boolean; error?: string }>;
+    /**
+     * Tests a form draft. When `apiKey` is omitted and a profile id is given,
+     * the stored key of that profile is used.
+     */
+    test(
+      input: AiSettingsInput,
+      profileId?: number | null,
+    ): Promise<{ ok: boolean; error?: string }>;
     /** 用系统浏览器打开 DeepSeek 的 API Key 页面。 */
     openDeepSeekConsole(): Promise<void>;
+  };
+  aiProfiles: {
+    list(): Promise<AiProfile[]>;
+    create(input: AiProfileInput): Promise<AiProfile>;
+    update(id: number, input: AiProfileInput): Promise<AiProfile>;
+    remove(id: number): Promise<void>;
+    activate(id: number): Promise<void>;
+    /** Sends one tiny real chat turn to every saved profile, in parallel. */
+    speedTestAll(): Promise<AiSpeedTestResult[]>;
   };
   appSettings: {
     get(): Promise<AppSettings>;

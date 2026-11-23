@@ -105,10 +105,17 @@ const api: PaperLensApi = {
   },
   settings: {
     get: () => ipcRenderer.invoke('settings:get'),
-    set: (input) => ipcRenderer.invoke('settings:set', input),
-    test: (input) => ipcRenderer.invoke('settings:test', input),
+    test: (input, profileId) => ipcRenderer.invoke('settings:test', input, profileId),
     openDeepSeekConsole: () =>
       ipcRenderer.invoke('settings:openDeepSeekConsole'),
+  },
+  aiProfiles: {
+    list: () => ipcRenderer.invoke('aiProfiles:list'),
+    create: (input) => ipcRenderer.invoke('aiProfiles:create', input),
+    update: (id, input) => ipcRenderer.invoke('aiProfiles:update', id, input),
+    remove: (id) => ipcRenderer.invoke('aiProfiles:remove', id),
+    activate: (id) => ipcRenderer.invoke('aiProfiles:activate', id),
+    speedTestAll: () => ipcRenderer.invoke('aiProfiles:speedTest'),
   },
   appSettings: {
     get: () => ipcRenderer.invoke('appSettings:get'),

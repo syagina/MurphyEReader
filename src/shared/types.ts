@@ -322,6 +322,43 @@ export interface AiSettingsInput {
   apiKey?: string;
 }
 
+/** One saved OpenAI-compatible endpoint. Never carries the API key itself. */
+export interface AiProfile {
+  id: number;
+  name: string;
+  baseUrl: string;
+  chatModel: string;
+  visionModel: string;
+  temperature: number;
+  tokenBudget: number;
+  apiKeySet: boolean;
+  active: boolean;
+  createdAt: number;
+}
+
+/**
+ * Create/update payload. `apiKey` undefined keeps the stored key, an empty
+ * string clears it, any other value replaces it.
+ */
+export interface AiProfileInput {
+  name: string;
+  baseUrl: string;
+  chatModel: string;
+  visionModel: string;
+  temperature: number;
+  tokenBudget: number;
+  apiKey?: string;
+}
+
+/** Result of one real-chat speed probe for a saved profile. */
+export interface AiSpeedTestResult {
+  profileId: number;
+  ok: boolean;
+  error?: string;
+  firstTokenMs?: number;
+  totalMs?: number;
+}
+
 export type ThemeMode = 'light' | 'dark' | 'eye-care' | 'paper';
 
 export interface AppSettings {

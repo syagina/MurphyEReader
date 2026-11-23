@@ -1,6 +1,6 @@
 import type Database from 'better-sqlite3';
 
-export const SCHEMA_VERSION = 5;
+export const SCHEMA_VERSION = 6;
 
 export const MIGRATION_V1 = `
 CREATE TABLE papers (
@@ -91,6 +91,93 @@ ALTER TABLE papers ADD COLUMN last_offset_original REAL NOT NULL DEFAULT 0;
 ALTER TABLE papers ADD COLUMN last_offset_translated REAL NOT NULL DEFAULT 0;
 ALTER TABLE papers ADD COLUMN page_count_bilingual INTEGER;
 `;
+
+export const MIGRATION_V6 = `
+CREATE TABLE IF NOT EXISTS ai_profiles (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  name TEXT NOT NULL,
+  base_url TEXT NOT NULL DEFAULT '',
+  chat_model TEXT NOT NULL DEFAULT '',
+  vision_model TEXT NOT NULL DEFAULT '',
+  temperature REAL NOT NULL DEFAULT 0.3,
+  token_budget INTEGER NOT NULL DEFAULT 100000,
+  api_key TEXT NOT NULL DEFAULT '',
+  sort_order INTEGER NOT NULL DEFAULT 0,
+  created_at INTEGER NOT NULL
+);
+`;
+
+const LEGACY_AI_KEYS = [
+  'ai.baseUrl',
+  'ai.chatModel',
+  'ai.visionModel',
+  'ai.temperature',
+  'ai.tokenBudget',
+  'ai.apiKey',
+] as const;
+
+const LEGACY_DEFAULT_TEMPERATURE = 0.3;
+const LEGACY_DEFAULT_TOKEN_BUDGET = 100000;
+
+/**
+ * Moves the single pre-v6 AI configuration into the first profile and points
+ * `ai.activeProfileId` at it. Ciphertext is copied verbatim; this layer never
+ * decrypts. Runs at most once, inside the migration transaction.
+ */
+function migrateLegacyAiProfile(db: Database.Database): void {
+  const read = db.prepare('SELECT value FROM settings WHERE key = ?');
+  const valueOf = (key: string): string => {
+    const row = read.get(key) as { value: string } | undefined;
+    return row?.value ?? '';
+  };
+
+  const baseUrl = valueOf('ai.baseUrl');
+  const chatModel = valueOf('ai.chatModel');
+  const visionModel = valueOf('ai.visionModel');
+  const temperatureRaw = valueOf('ai.temperature');
+  const tokenBudgetRaw = valueOf('ai.tokenBudget');
+  const apiKey = valueOf('ai.apiKey');
+  if (
+    [baseUrl, chatModel, visionModel, temperatureRaw, tokenBudgetRaw, apiKey].every(
+      (value) => value === '',
+    )
+  ) {
+    return;
+  }
+
+  const temperature = Number(temperatureRaw);
+  const tokenBudget = Number(tokenBudgetRaw);
+  const inserted = db
+    .prepare(
+      `INSERT INTO ai_profiles
+        (name, base_url, chat_model, vision_model, temperature, token_budget, api_key, sort_order, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?)`,
+    )
+    .run(
+      '默认配置',
+      baseUrl,
+      chatModel,
+      visionModel,
+      temperatureRaw !== '' && Number.isFinite(temperature)
+        ? temperature
+        : LEGACY_DEFAULT_TEMPERATURE,
+      tokenBudgetRaw !== '' && Number.isFinite(tokenBudget)
+        ? tokenBudget
+        : LEGACY_DEFAULT_TOKEN_BUDGET,
+      apiKey,
+      Date.now(),
+    );
+
+  db.prepare(
+    `INSERT INTO settings (key, value) VALUES (?, ?)
+     ON CONFLICT(key) DO UPDATE SET value = excluded.value`,
+  ).run('ai.activeProfileId', String(inserted.lastInsertRowid));
+
+  const remove = db.prepare('DELETE FROM settings WHERE key = ?');
+  for (const key of LEGACY_AI_KEYS) {
+    remove.run(key);
+  }
+}
 
 interface FtsTable {
   name: string;
@@ -199,6 +286,11 @@ export function migrate(db: Database.Database): void {
     if (userVersion < 5) {
       db.exec(MIGRATION_V5);
       db.pragma('user_version = 5');
+    }
+    if (userVersion < 6) {
+      db.exec(MIGRATION_V6);
+      db.pragma('user_version = 6');
+      migrateLegacyAiProfile(db);
     }
     ensureFtsObjects(db);
   })();
